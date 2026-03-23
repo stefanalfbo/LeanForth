@@ -1,1 +1,24 @@
 # LeanForth
+
+LeanForth is a small experiment in building a Forth interpreter with the help of the Lean programming language.
+
+## Running the program
+
+Make sure Lean and Lake are available via `elan`, then run:
+
+```powershell
+lake build
+lake exe leanforth
+```
+
+`lake build` compiles the library and executables defined in `lakefile.toml`. `lake exe leanforth` runs the main program from `Main.lean`.
+
+## Running the tests
+
+This repository defines a separate test executable in `Test.lean`. Run it with:
+
+```powershell
+lake exe test
+```
+
+The test file uses `#guard` assertions to validate the evaluator. If all checks pass, the executable prints `All tests passed!`.
