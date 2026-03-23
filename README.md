@@ -1,6 +1,6 @@
 # LeanForth
 
-LeanForth is a small experiment in building a Forth interpreter with the help of the Lean programming language.
+LeanForth is a small experiment in building a Forth interpreter with the help of the [Lean programming language](https://lean-lang.org/).
 
 ## Running the program
 
