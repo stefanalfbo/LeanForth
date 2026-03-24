@@ -1,6 +1,7 @@
 name = "LeanForth"
 version = "0.1.0"
 defaultTargets = ["leanforth"]
+srcDir = "src"
 
 [[lean_lib]]
 name = "LeanForth"
