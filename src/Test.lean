@@ -1,4 +1,5 @@
 import LeanForth.Eval
+import LeanForth.Cli
 
 open LeanForth
 
@@ -13,6 +14,12 @@ open LeanForth
 
 -- stack underflow leaves stack unchanged
 #guard eval [.Add] == []
+
+-- line splitting keeps each file line as a separate entry
+#guard fileLines "1 2 +\n.\" hello\"\ndup *" == ["1 2 +", ".\" hello\"", "dup *"]
+
+-- CRLF input is normalized for console printing
+#guard fileLines "1 2 +\r\n3 4 +\r\n" == ["1 2 +", "3 4 +", ""]
 
 def main : IO Unit :=
   IO.println "All tests passed!"
