@@ -2,4 +2,4 @@
 -- Import modules here that should be built as part of the library.
 import LeanForth.Cli
 import LeanForth.Eval
-import LeanForth.Runtime
+import LeanForth.EnvRuntime

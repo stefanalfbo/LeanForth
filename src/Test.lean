@@ -1,6 +1,6 @@
 import LeanForth.Eval
 import LeanForth.Cli
-import LeanForth.Runtime
+import LeanForth.EnvRuntime
 
 open LeanForth
 
@@ -24,6 +24,11 @@ open LeanForth
 
 -- tokenizer ignores repeated whitespace and newlines
 #guard tokenizeRuntime "1  2\t+\n dup" == ["1", "2", "+", "dup"]
+
+-- built-in words are available through the initial dictionary
+#guard lookupWord initialDictionary "+" |>.isSome
+#guard lookupWord initialDictionary "dup" |>.isSome
+#guard lookupWord initialDictionary "nope" |>.isNone
 
 -- source programs are parsed and evaluated left-to-right
 #guard runRuntime "3 4 +" == .ok { stack := [7] }

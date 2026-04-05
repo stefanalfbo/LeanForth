@@ -11,7 +11,7 @@ lake build
 lake exe leanforth
 ```
 
-`lake build` compiles the library and executables defined in `lakefile.toml`. `lake exe leanforth` runs the main program from `Main.lean`.
+`lake build` compiles the library and executables defined in `lakefile.toml`. `lake exe leanforth sample.forth` runs the main program from `Main.lean` and evaluates the file as a small Forth-like program.
 
 ## Running the tests
 
