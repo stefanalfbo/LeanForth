@@ -27,25 +27,34 @@ open LeanForth
 -- built-in words are available through the initial dictionary
 #guard lookupWord initialDictionary "+" |>.isSome
 #guard lookupWord initialDictionary "dup" |>.isSome
+#guard lookupWord initialDictionary "." |>.isSome
+#guard lookupWord initialDictionary "cr" |>.isSome
 #guard lookupWord initialDictionary "nope" |>.isNone
 #guard lookupWord (defineWord initialDictionary "sq" (.user ["dup", "*"])) "sq" |>.isSome
 
 -- source programs are parsed and evaluated left-to-right
-#guard runRuntime "3 4 +" == .ok { stack := [7] }
+#guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
 
 -- stack words operate on source text, not hand-built constructors
-#guard runRuntime "2 dup *" == .ok { stack := [4] }
-#guard runRuntime "1 2 swap" == .ok { stack := [1, 2] }
-#guard runRuntime "1 2 over" == .ok { stack := [1, 2, 1] }
+#guard runRuntime "2 dup *" == .ok { stack := [4], output := "" }
+#guard runRuntime "1 2 swap" == .ok { stack := [1, 2], output := "" }
+#guard runRuntime "1 2 over" == .ok { stack := [1, 2, 1], output := "" }
+
+-- output words append to the output buffer and `.` pops the printed value
+#guard runRuntime "7 ." == .ok { stack := [], output := "7" }
+#guard runRuntime "3 4 + . cr" == .ok { stack := [], output := "7\n" }
+#guard runRuntime "1 2 . ." == .ok { stack := [], output := "21" }
 
 -- user-defined words can be introduced with `: name ... ;`
-#guard runRuntime ": sq dup * ; 5 sq" == .ok { stack := [25] }
-#guard runRuntime ": sq dup * ; 3 sq 4 sq +" == .ok { stack := [25] }
-#guard runRuntime ": twice dup + ; 7 twice" == .ok { stack := [14] }
+#guard runRuntime ": sq dup * ; 5 sq" == .ok { stack := [25], output := "" }
+#guard runRuntime ": sq dup * ; 3 sq 4 sq +" == .ok { stack := [25], output := "" }
+#guard runRuntime ": twice dup + ; 7 twice" == .ok { stack := [14], output := "" }
+#guard runRuntime ": show-square dup * . ; 5 show-square" == .ok { stack := [], output := "25" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope")
 #guard runRuntime "+" == .error (.stackUnderflow "+")
+#guard runRuntime "." == .error (.stackUnderflow ".")
 #guard runRuntime ":" == .error .invalidDefinition
 #guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq")
 

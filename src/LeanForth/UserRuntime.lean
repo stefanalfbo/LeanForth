@@ -21,6 +21,7 @@ inductive Instruction where
 /-- The current machine state. -/
 structure RuntimeState where
   stack : RuntimeStack
+  output : String
   deriving Repr, DecidableEq, BEq
 
 /-- Errors reported by the interpreter. -/
@@ -61,6 +62,10 @@ def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) : Run
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
   { state with stack := n :: state.stack }
 
+/-- Append text to the output buffer. -/
+def appendOutput (state : RuntimeState) (text : String) : RuntimeState :=
+  { state with output := state.output ++ text }
+
 /-- Execute one low-level instruction against a stack. -/
 def executeInstruction (stack : Stack) : Instruction → Stack
   | .Push n => n :: stack
@@ -92,6 +97,8 @@ def builtinWord (name : String) : RuntimeState → Except RuntimeError RuntimeSt
     | "drop", _ :: rest => Except.ok { state with stack := rest }
     | "swap", a :: b :: rest => Except.ok { state with stack := b :: a :: rest }
     | "over", a :: b :: rest => Except.ok { state with stack := b :: a :: b :: rest }
+    | ".", a :: rest => Except.ok <| appendOutput { state with stack := rest } (toString a)
+    | "cr", _ => Except.ok <| appendOutput state "\n"
     | "+", _ => Except.error (.stackUnderflow "+")
     | "-", _ => Except.error (.stackUnderflow "-")
     | "*", _ => Except.error (.stackUnderflow "*")
@@ -99,16 +106,17 @@ def builtinWord (name : String) : RuntimeState → Except RuntimeError RuntimeSt
     | "drop", _ => Except.error (.stackUnderflow "drop")
     | "swap", _ => Except.error (.stackUnderflow "swap")
     | "over", _ => Except.error (.stackUnderflow "over")
+    | ".", _ => Except.error (.stackUnderflow ".")
     | _, _ => Except.error (.unknownWord name)
 
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
-  ["+", "-", "*", "dup", "drop", "swap", "over"].map fun name =>
+  ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr"].map fun name =>
     (name, WordDef.prim (builtinWord name))
 
 /-- The empty initial machine state. -/
 def initialRuntimeState : RuntimeState :=
-  { stack := [] }
+  { stack := [], output := "" }
 
 /-- Split source text into whitespace-separated tokens. -/
 def tokenizeRuntime (source : String) : List String :=

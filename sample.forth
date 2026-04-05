@@ -1,3 +1,5 @@
-: sq dup * ;
-5 sq
-3 sq 4 sq +
+: square dup * ;
+5 square .
+cr
+3 square 4 square + .
+cr
