@@ -1,5 +1,5 @@
 import LeanForth.Cli
-import LeanForth.UserRuntime
+import LeanForth.CompiledRuntime
 
 open LeanForth
 
@@ -31,7 +31,7 @@ open LeanForth
 #guard lookupWord initialDictionary "." |>.isSome
 #guard lookupWord initialDictionary "cr" |>.isSome
 #guard lookupWord initialDictionary "nope" |>.isNone
-#guard lookupWord (defineWord initialDictionary "sq" (.user ["dup", "*"])) "sq" |>.isSome
+#guard lookupWord (defineWord initialDictionary "sq" (.compiled [.call "dup", .call "*"])) "sq" |>.isSome
 
 -- source programs are parsed and evaluated left-to-right
 #guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
