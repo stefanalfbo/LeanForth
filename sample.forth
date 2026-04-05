@@ -1,3 +1,3 @@
-3 4 +
-2 dup *
-1 2 over
+: sq dup * ;
+5 sq
+3 sq 4 sq +
