@@ -24,6 +24,7 @@ open LeanForth
 -- tokenizer ignores repeated whitespace and newlines
 #guard tokenizeRuntime "1  2\t+\n dup" == .ok ["1", "2", "+", "dup"]
 #guard tokenizeRuntime ".\" hello world\"" == .ok [".\"", "hello world"]
+#guard tokenizeRuntime "1 2 + \\ ignore this\n dup" == .ok ["1", "2", "+", "dup"]
 
 -- built-in words are available through the initial dictionary
 #guard lookupWord initialDictionary "+" |>.isSome
@@ -35,11 +36,13 @@ open LeanForth
 
 -- source programs are parsed and evaluated left-to-right
 #guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
+#guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
 
 -- stack words operate on source text, not hand-built constructors
 #guard runRuntime "2 dup *" == .ok { stack := [4], output := "" }
 #guard runRuntime "1 2 swap" == .ok { stack := [1, 2], output := "" }
 #guard runRuntime "1 2 over" == .ok { stack := [1, 2, 1], output := "" }
+#guard runRuntime "1 2 \\ comment here\n over" == .ok { stack := [1, 2, 1], output := "" }
 
 -- output words append to the output buffer and `.` pops the printed value
 #guard runRuntime "7 ." == .ok { stack := [], output := "7" }
@@ -54,6 +57,7 @@ open LeanForth
 #guard runRuntime ": twice dup + ; 7 twice" == .ok { stack := [14], output := "" }
 #guard runRuntime ": show-square dup * . ; 5 show-square" == .ok { stack := [], output := "25" }
 #guard runRuntime ": greet .\" hello\" ; greet" == .ok { stack := [], output := "hello" }
+#guard runRuntime ": sq dup * \\ square it\n ; 6 sq" == .ok { stack := [36], output := "" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope")

@@ -150,6 +150,14 @@ def dropLeadingWhitespace : List Char → List Char
         ch :: rest
   | [] => []
 
+/-- Skip characters until the next line break for `\` comments. -/
+def dropLineComment : List Char → List Char
+  | [] => []
+  | '\n' :: rest => rest
+  | '\r' :: '\n' :: rest => rest
+  | '\r' :: rest => rest
+  | _ :: rest => dropLineComment rest
+
 /-- Turn source text into runtime tokens, preserving `." ..."` as two tokens. -/
 partial def tokenizeChars (chars : List Char) (current : List Char) (acc : List String) :
     Except RuntimeError (List String) := do
@@ -161,6 +169,9 @@ partial def tokenizeChars (chars : List Char) (current : List Char) (acc : List 
       let acc := if current.isEmpty then acc else String.ofList current :: acc
       let (quoted, remaining) ← takeQuotedChars (dropLeadingWhitespace rest)
       tokenizeChars remaining [] (String.ofList quoted :: ".\"" :: acc)
+  | '\\' :: rest =>
+      let acc := if current.isEmpty then acc else String.ofList current :: acc
+      tokenizeChars (dropLineComment rest) [] acc
   | ch :: rest =>
       if ch.isWhitespace then
         let acc := if current.isEmpty then acc else String.ofList current :: acc
