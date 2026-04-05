@@ -1,4 +1,3 @@
-import LeanForth.Eval
 import LeanForth.Cli
 import LeanForth.UserRuntime
 

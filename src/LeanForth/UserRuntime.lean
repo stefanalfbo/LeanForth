@@ -7,6 +7,17 @@ The head of the list is the top of the stack.
 -/
 abbrev RuntimeStack := List Int
 
+/-- Backward-compatible alias for the old evaluator API. -/
+abbrev Stack := RuntimeStack
+
+/-- A small instruction language for low-level tests and direct execution. -/
+inductive Instruction where
+  | Push (n : Int)
+  | Add
+  | Sub
+  | Mul
+  deriving Repr, DecidableEq
+
 /-- The current machine state. -/
 structure RuntimeState where
   stack : RuntimeStack
@@ -49,6 +60,26 @@ def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) : Run
 /-- Push a value onto the stack. -/
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
   { state with stack := n :: state.stack }
+
+/-- Execute one low-level instruction against a stack. -/
+def executeInstruction (stack : Stack) : Instruction → Stack
+  | .Push n => n :: stack
+  | .Add =>
+      match stack with
+      | a :: b :: rest => (b + a) :: rest
+      | _ => stack
+  | .Sub =>
+      match stack with
+      | a :: b :: rest => (b - a) :: rest
+      | _ => stack
+  | .Mul =>
+      match stack with
+      | a :: b :: rest => (b * a) :: rest
+      | _ => stack
+
+/-- Evaluate a low-level instruction sequence from an empty stack. -/
+def eval (instructions : List Instruction) : Stack :=
+  instructions.foldl executeInstruction []
 
 /-- Built-in arithmetic and stack words. -/
 def builtinWord (name : String) : RuntimeState → Except RuntimeError RuntimeState :=
