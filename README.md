@@ -22,3 +22,7 @@ lake exe test
 ```
 
 The test file uses `#guard` assertions to validate the evaluator. If all checks pass, the executable prints `All tests passed!`.
+
+## Resources
+
+* [Implementing a Forth](https://ratfactor.com/forth/implementing)
