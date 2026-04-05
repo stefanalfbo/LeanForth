@@ -1,11 +1,12 @@
 import LeanForth
 
-def printFileLines (path : System.FilePath) : IO Unit := do
+def printResult (path : System.FilePath) : IO Unit := do
   let contents ← IO.FS.readFile path
-  for line in LeanForth.fileLines contents do
-    IO.println line
+  match LeanForth.runRuntime contents with
+  | .ok state => IO.println s!"stack: {repr state.stack}"
+  | .error err => IO.eprintln s!"error: {repr err}"
 
 def main (args : List String) : IO Unit := do
   match args with
-  | filePath :: _ => printFileLines filePath
+  | filePath :: _ => printResult filePath
   | [] => IO.println "Usage: leanforth.exe <file>"
