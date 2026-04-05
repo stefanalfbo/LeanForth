@@ -1,5 +1,5 @@
 import LeanForth.Cli
-import LeanForth.CompiledRuntime
+import LeanForth.Runtime
 
 open LeanForth
 
