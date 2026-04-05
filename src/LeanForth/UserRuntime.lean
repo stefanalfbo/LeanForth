@@ -30,6 +30,7 @@ inductive RuntimeError where
   | unknownWord (word : String)
   | invalidDefinition
   | missingSemicolon (word : String)
+  | unterminatedString
   deriving Repr, DecidableEq, BEq
 
 /-- Dictionary entries supported by the runtime. -/
@@ -44,6 +45,13 @@ instance : BEq (Except RuntimeError RuntimeState) where
   beq left right :=
     match left, right with
     | Except.ok leftState, Except.ok rightState => leftState == rightState
+    | Except.error leftErr, Except.error rightErr => leftErr == rightErr
+    | _, _ => false
+
+instance : BEq (Except RuntimeError (List String)) where
+  beq left right :=
+    match left, right with
+    | Except.ok leftTokens, Except.ok rightTokens => leftTokens == rightTokens
     | Except.error leftErr, Except.error rightErr => leftErr == rightErr
     | _, _ => false
 
@@ -118,9 +126,47 @@ def initialDictionary : RuntimeDictionary :=
 def initialRuntimeState : RuntimeState :=
   { stack := [], output := "" }
 
-/-- Split source text into whitespace-separated tokens. -/
-def tokenizeRuntime (source : String) : List String :=
-  source.split (·.isWhitespace) |>.toList |>.map (·.toString) |>.filter fun token => !token.isEmpty
+/-- Read a quoted string up to the next `"`. -/
+partial def takeQuotedChars : List Char → Except RuntimeError (List Char × List Char)
+  | [] => Except.error .unterminatedString
+  | '"' :: rest => Except.ok ([], rest)
+  | ch :: rest => do
+      let (quoted, remaining) ← takeQuotedChars rest
+      Except.ok (ch :: quoted, remaining)
+
+/-- Skip whitespace directly after `."`. -/
+def dropLeadingWhitespace : List Char → List Char
+  | ch :: rest =>
+      if ch.isWhitespace then
+        dropLeadingWhitespace rest
+      else
+        ch :: rest
+  | [] => []
+
+/-- Turn source text into runtime tokens, preserving `." ..."` as two tokens. -/
+partial def tokenizeChars (chars : List Char) (current : List Char) (acc : List String) :
+    Except RuntimeError (List String) := do
+  match chars with
+  | [] =>
+      let acc :=
+        if current.isEmpty then acc else String.ofList current :: acc
+      Except.ok acc.reverse
+  | '.' :: '"' :: rest =>
+      let acc :=
+        if current.isEmpty then acc else String.ofList current :: acc
+      let (quoted, remaining) ← takeQuotedChars (dropLeadingWhitespace rest)
+      tokenizeChars remaining [] (String.ofList quoted :: ".\"" :: acc)
+  | ch :: rest =>
+      if ch.isWhitespace then
+        let acc :=
+          if current.isEmpty then acc else String.ofList current :: acc
+        tokenizeChars rest [] acc
+      else
+        tokenizeChars rest (current ++ [ch]) acc
+
+/-- Split source text into runtime tokens. -/
+def tokenizeRuntime (source : String) : Except RuntimeError (List String) :=
+  tokenizeChars source.toList [] []
 
 /-- Read tokens up to the next `;`, returning the body and remaining input. -/
 def takeDefinitionBody (word : String) : List String → Except RuntimeError (List String × List String)
@@ -150,6 +196,10 @@ mutual
       (state : RuntimeState)
       : List String → Except RuntimeError (RuntimeDictionary × RuntimeState)
     | [] => Except.ok (dict, state)
+    | ".\"" :: text :: rest =>
+        let nextState := appendOutput state text
+        interpretTokens dict nextState rest
+    | ".\"" :: [] => Except.error .unterminatedString
     | ":" :: name :: rest => do
         let (body, remaining) ← takeDefinitionBody name rest
         let nextDict := defineWord dict name (.user body)
@@ -170,6 +220,8 @@ def evalRuntimeTokens
 
 /-- Parse and evaluate source text in one step. -/
 def runRuntime (source : String) : Except RuntimeError RuntimeState :=
-  evalRuntimeTokens initialDictionary (tokenizeRuntime source)
+  do
+    let tokens ← tokenizeRuntime source
+    evalRuntimeTokens initialDictionary tokens
 
 end LeanForth

@@ -22,7 +22,8 @@ open LeanForth
 #guard fileLines "1 2 +\r\n3 4 +\r\n" == ["1 2 +", "3 4 +", ""]
 
 -- tokenizer ignores repeated whitespace and newlines
-#guard tokenizeRuntime "1  2\t+\n dup" == ["1", "2", "+", "dup"]
+#guard tokenizeRuntime "1  2\t+\n dup" == .ok ["1", "2", "+", "dup"]
+#guard tokenizeRuntime ".\" hello world\"" == .ok [".\"", "hello world"]
 
 -- built-in words are available through the initial dictionary
 #guard lookupWord initialDictionary "+" |>.isSome
@@ -44,12 +45,15 @@ open LeanForth
 #guard runRuntime "7 ." == .ok { stack := [], output := "7" }
 #guard runRuntime "3 4 + . cr" == .ok { stack := [], output := "7\n" }
 #guard runRuntime "1 2 . ." == .ok { stack := [], output := "21" }
+#guard runRuntime ".\" hello\"" == .ok { stack := [], output := "hello" }
+#guard runRuntime ".\" hello world\" cr" == .ok { stack := [], output := "hello world\n" }
 
 -- user-defined words can be introduced with `: name ... ;`
 #guard runRuntime ": sq dup * ; 5 sq" == .ok { stack := [25], output := "" }
 #guard runRuntime ": sq dup * ; 3 sq 4 sq +" == .ok { stack := [25], output := "" }
 #guard runRuntime ": twice dup + ; 7 twice" == .ok { stack := [14], output := "" }
 #guard runRuntime ": show-square dup * . ; 5 show-square" == .ok { stack := [], output := "25" }
+#guard runRuntime ": greet .\" hello\" ; greet" == .ok { stack := [], output := "hello" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope")
@@ -57,6 +61,7 @@ open LeanForth
 #guard runRuntime "." == .error (.stackUnderflow ".")
 #guard runRuntime ":" == .error .invalidDefinition
 #guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq")
+#guard runRuntime ".\" hello" == .error .unterminatedString
 
 def main : IO Unit :=
   IO.println "All tests passed!"
