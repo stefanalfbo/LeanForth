@@ -42,6 +42,15 @@ open LeanForth
 #guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
+#guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
+  | .ok session => (lookupWord session.dict "sq").isSome && session.state == initialRuntimeState
+  | .error _ => false
+#guard match runRuntimeFrom initialRuntimeSession "2" with
+  | .ok session =>
+      match runRuntimeFrom session "3 +" with
+      | .ok nextSession => nextSession.state == { stack := [5], output := "" }
+      | .error _ => false
+  | .error _ => false
 
 -- stack words operate on source text, not hand-built constructors
 #guard runRuntime "2 dup *" == .ok { stack := [4], output := "" }

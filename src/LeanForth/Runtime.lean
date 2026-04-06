@@ -61,6 +61,11 @@ structure DictEntry where
 /-- The active dictionary maps names to primitive or compiled words. -/
 abbrev RuntimeDictionary := List (String × DictEntry)
 
+/-- A persistent interpreter session used for incremental evaluation such as a REPL. -/
+structure RuntimeSession where
+  dict : RuntimeDictionary
+  state : RuntimeState
+
 instance : BEq (Except RuntimeError RuntimeState) where
   beq left right :=
     match left, right with
@@ -159,6 +164,10 @@ def initialDictionary : RuntimeDictionary :=
 /-- The empty initial machine state. -/
 def initialRuntimeState : RuntimeState :=
   { stack := [], output := "" }
+
+/-- The initial interpreter session. -/
+def initialRuntimeSession : RuntimeSession :=
+  { dict := initialDictionary, state := initialRuntimeState }
 
 /-- Compile-time state used while building a colon definition. -/
 structure DefinitionCompileState where
@@ -413,9 +422,20 @@ def evalRuntimeTokens (dict : RuntimeDictionary) (tokens : List SourceToken) : E
   let (compiledDict, ops) ← interpretTokens dict [] tokens
   executeOps compiledDict initialRuntimeState ops
 
+/-- Evaluate source tokens against an existing dictionary and runtime state. -/
+def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken) : Except RuntimeError RuntimeSession := do
+  let (compiledDict, ops) ← interpretTokens session.dict [] tokens
+  let nextState ← executeOps compiledDict session.state ops
+  Except.ok { dict := compiledDict, state := nextState }
+
 /-- Parse and evaluate source text in one step. -/
 def runRuntime (source : String) : Except RuntimeError RuntimeState := do
   let tokens ← tokenizeRuntime source
   evalRuntimeTokens initialDictionary tokens
+
+/-- Parse and evaluate source text against an existing interpreter session. -/
+def runRuntimeFrom (session : RuntimeSession) (source : String) : Except RuntimeError RuntimeSession := do
+  let tokens ← tokenizeRuntime source
+  evalRuntimeTokensFrom session tokens
 
 end LeanForth
