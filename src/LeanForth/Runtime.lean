@@ -37,6 +37,7 @@ inductive RuntimeError where
   | invalidDefinition (line : Nat)
   | missingSemicolon (word : String) (line : Nat)
   | unterminatedString (line : Nat)
+  | unterminatedComment (line : Nat)
   | missingCharArgument (line : Nat)
   deriving Repr, DecidableEq, BEq
 
@@ -76,6 +77,7 @@ def formatRuntimeError : RuntimeError → String
   | .invalidDefinition line => s!"line {line}: invalid definition"
   | .missingSemicolon word line => s!"line {line}: missing `;` for `{word}`"
   | .unterminatedString line => s!"line {line}: unterminated string"
+  | .unterminatedComment line => s!"line {line}: unterminated comment"
   | .missingCharArgument line => s!"line {line}: `CHAR` requires a following token"
 
 /-- Find a word in the dictionary by name. -/
@@ -254,6 +256,15 @@ def compileToken (token : SourceToken) : Op :=
   | some n => .push n
   | none => .call trimmed token.line
 
+/-- Skip tokenized `( ... )` comments up to and including the closing `)`. -/
+def dropCommentTokens (startLine : Nat) : List SourceToken → Except RuntimeError (List SourceToken)
+  | [] => Except.error (.unterminatedComment startLine)
+  | token :: rest =>
+      if token.text == ")" then
+        Except.ok rest
+      else
+        dropCommentTokens startLine rest
+
 /-- Compile a token list into runtime operations. -/
 def compileTokens : List SourceToken → List Op
   | [] => []
@@ -306,7 +317,11 @@ partial def compileDefinitionTokens
   | [] => Except.error (.missingSemicolon word startLine)
   | token :: rest =>
       if state.immediateMode then
-        if token.text == "]" then
+        if token.text == "(" then
+          do
+          let remaining ← dropCommentTokens token.line rest
+          compileDefinitionTokens dict word startLine state remaining
+        else if token.text == "]" then
           compileDefinitionTokens dict word startLine { state with immediateMode := false } rest
         else if token.text == "CHAR" then
           match rest with
@@ -349,7 +364,11 @@ partial def interpretTokens
     : List SourceToken → Except RuntimeError (RuntimeDictionary × List Op)
   | [] => Except.ok (dict, opsRev.reverse)
   | token :: rest =>
-      if token.text == ":" then
+      if token.text == "(" then
+        do
+        let remaining ← dropCommentTokens token.line rest
+        interpretTokens dict opsRev remaining
+      else if token.text == ":" then
         match rest with
         | [] => Except.error (.invalidDefinition token.line)
         | nameTok :: remaining => do

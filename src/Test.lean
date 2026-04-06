@@ -40,6 +40,8 @@ open LeanForth
 -- source programs are parsed and evaluated left-to-right
 #guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
+#guard runRuntime "3 ( add later ) 4 +" == .ok { stack := [7], output := "" }
+#guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
 
 -- stack words operate on source text, not hand-built constructors
 #guard runRuntime "2 dup *" == .ok { stack := [4], output := "" }
@@ -72,6 +74,7 @@ open LeanForth
 #guard runRuntime ":" == .error (.invalidDefinition 1)
 #guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq" 1)
 #guard runRuntime ".\" hello" == .error (.unterminatedString 1)
+#guard runRuntime "( never closes" == .error (.unterminatedComment 1)
 #guard runRuntime ": x [ CHAR" == .error (.missingCharArgument 1)
 #guard runRuntime "1\n]" == .error (.unknownWord "]" 2)
 
