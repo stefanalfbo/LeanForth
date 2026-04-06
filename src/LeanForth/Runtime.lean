@@ -53,8 +53,13 @@ inductive WordDef where
   | prim (run : Nat → RuntimeState → Except RuntimeError RuntimeState)
   | compiled (ops : List Op)
 
+/-- A dictionary entry pairs a word definition with its immediate flag. -/
+structure DictEntry where
+  word : WordDef
+  immediate : Bool
+
 /-- The active dictionary maps names to primitive or compiled words. -/
-abbrev RuntimeDictionary := List (String × WordDef)
+abbrev RuntimeDictionary := List (String × DictEntry)
 
 instance : BEq (Except RuntimeError RuntimeState) where
   beq left right :=
@@ -80,16 +85,20 @@ def formatRuntimeError : RuntimeError → String
   | .unterminatedComment line => s!"line {line}: unterminated comment"
   | .missingCharArgument line => s!"line {line}: `CHAR` requires a following token"
 
-/-- Find a word in the dictionary by name. -/
-def lookupWord (dict : RuntimeDictionary) (name : String) : Option WordDef :=
+/-- Find a dictionary entry by word name. -/
+def lookupEntry (dict : RuntimeDictionary) (name : String) : Option DictEntry :=
   match dict with
   | [] => none
-  | (entryName, word) :: rest =>
-      if entryName == name then some word else lookupWord rest name
+  | (entryName, entry) :: rest =>
+      if entryName == name then some entry else lookupEntry rest name
+
+/-- Find a word definition in the dictionary by name. -/
+def lookupWord (dict : RuntimeDictionary) (name : String) : Option WordDef :=
+  (lookupEntry dict name).map DictEntry.word
 
 /-- Add or shadow a dictionary entry. -/
-def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) : RuntimeDictionary :=
-  (name, word) :: dict
+def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) (immediate := false) : RuntimeDictionary :=
+  (name, { word := word, immediate := immediate }) :: dict
 
 /-- Push a value onto the stack. -/
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
@@ -145,7 +154,7 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
   ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr"].map fun name =>
-    (name, WordDef.prim (builtinWord name))
+    (name, { word := WordDef.prim (builtinWord name), immediate := false })
 
 /-- The empty initial machine state. -/
 def initialRuntimeState : RuntimeState :=
@@ -156,11 +165,12 @@ structure DefinitionCompileState where
   opsRev : List Op
   compileStack : RuntimeStack
   immediateMode : Bool
+  definingWordImmediate : Bool
   deriving Repr, DecidableEq, BEq
 
 /-- The initial compile-time state for a colon definition. -/
 def initialDefinitionCompileState : DefinitionCompileState :=
-  { opsRev := [], compileStack := [], immediateMode := false }
+  { opsRev := [], compileStack := [], immediateMode := false, definingWordImmediate := false }
 
 /-- Read a quoted string up to the next `"`, tracking line numbers. -/
 partial def takeQuotedChars (line : Nat) : List Char → Except RuntimeError (List Char × List Char × Nat)
@@ -304,6 +314,10 @@ partial def executeImmediateToken
   let runtimeState ← executeOp dict { stack := state.compileStack, output := "" } (compileToken token)
   Except.ok { state with compileStack := runtimeState.stack }
 
+/-- Compile a token as a call, even if the word is immediate. -/
+def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
+  { state with opsRev := compileToken token :: state.opsRev }
+
 /--
 Compile one token inside a colon definition. The definition ends only on a
 bare `;` while in compile mode, so `CHAR ;` remains legal inside `[ ... ]`.
@@ -339,6 +353,13 @@ partial def compileDefinitionTokens
           compileDefinitionTokens dict word startLine nextState rest
       else if token.text == ";" then
         Except.ok (state, rest)
+      else if token.text == "IMMEDIATE" then
+        compileDefinitionTokens dict word startLine { state with definingWordImmediate := true } rest
+      else if token.text == "[COMPILE]" then
+        match rest with
+        | [] => Except.error (.unknownWord "[COMPILE]" token.line)
+        | nextTok :: remaining =>
+            compileDefinitionTokens dict word startLine (compileLiteralToken nextTok state) remaining
       else if token.text == "[" then
         compileDefinitionTokens dict word startLine { state with immediateMode := true } rest
       else if token.text == "LITERAL" then
@@ -354,8 +375,15 @@ partial def compileDefinitionTokens
             compileDefinitionTokens dict word startLine
               { state with opsRev := .emitText textTok.text :: state.opsRev } remaining
       else
-        compileDefinitionTokens dict word startLine
-          { state with opsRev := compileToken token :: state.opsRev } rest
+        match lookupEntry dict token.text with
+        | some entry =>
+            if entry.immediate then do
+              let nextState ← executeImmediateToken dict state token
+              compileDefinitionTokens dict word startLine nextState rest
+            else
+              compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
+        | none =>
+            compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
 
 /-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
 partial def interpretTokens
@@ -374,7 +402,7 @@ partial def interpretTokens
         | nameTok :: remaining => do
             let (compileState, afterDef) ←
               compileDefinitionTokens dict nameTok.text nameTok.line initialDefinitionCompileState remaining
-            let nextDict := defineWord dict nameTok.text (.compiled compileState.opsRev.reverse)
+            let nextDict := defineWord dict nameTok.text (.compiled compileState.opsRev.reverse) compileState.definingWordImmediate
             interpretTokens nextDict opsRev afterDef
       else if token.text == ".\"" then
         match rest with

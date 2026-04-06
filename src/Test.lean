@@ -66,6 +66,8 @@ open LeanForth
 #guard runRuntime ": x [ 3 4 + ] LITERAL ; x" == .ok { stack := [7], output := "" }
 #guard runRuntime ": semicolon [ CHAR ; ] LITERAL ; semicolon" == .ok { stack := [59], output := "" }
 #guard runRuntime ": ':' [ CHAR : ] LITERAL ; ':'" == .ok { stack := [58], output := "" }
+#guard runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x" == .ok { stack := [5], output := "" }
+#guard runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y" == .ok { stack := [5], output := "" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
