@@ -37,6 +37,7 @@ inductive RuntimeError where
   | invalidDefinition (line : Nat)
   | missingSemicolon (word : String) (line : Nat)
   | unterminatedString (line : Nat)
+  | missingCharArgument (line : Nat)
   deriving Repr, DecidableEq, BEq
 
 /-- Compiled operations for user-defined words and top-level code. -/
@@ -75,6 +76,7 @@ def formatRuntimeError : RuntimeError → String
   | .invalidDefinition line => s!"line {line}: invalid definition"
   | .missingSemicolon word line => s!"line {line}: missing `;` for `{word}`"
   | .unterminatedString line => s!"line {line}: unterminated string"
+  | .missingCharArgument line => s!"line {line}: `CHAR` requires a following token"
 
 /-- Find a word in the dictionary by name. -/
 def lookupWord (dict : RuntimeDictionary) (name : String) : Option WordDef :=
@@ -146,6 +148,17 @@ def initialDictionary : RuntimeDictionary :=
 /-- The empty initial machine state. -/
 def initialRuntimeState : RuntimeState :=
   { stack := [], output := "" }
+
+/-- Compile-time state used while building a colon definition. -/
+structure DefinitionCompileState where
+  opsRev : List Op
+  compileStack : RuntimeStack
+  immediateMode : Bool
+  deriving Repr, DecidableEq, BEq
+
+/-- The initial compile-time state for a colon definition. -/
+def initialDefinitionCompileState : DefinitionCompileState :=
+  { opsRev := [], compileStack := [], immediateMode := false }
 
 /-- Read a quoted string up to the next `"`, tracking line numbers. -/
 partial def takeQuotedChars (line : Nat) : List Char → Except RuntimeError (List Char × List Char × Nat)
@@ -234,16 +247,6 @@ partial def tokenizeChars
 def tokenizeRuntime (source : String) : Except RuntimeError (List SourceToken) :=
   tokenizeChars source.toList 1 [] 1 []
 
-/-- Read tokens up to the next `;`, returning the body and remaining input. -/
-def takeDefinitionBody (word : String) (line : Nat) : List SourceToken → Except RuntimeError (List SourceToken × List SourceToken)
-  | [] => Except.error (.missingSemicolon word line)
-  | token :: rest =>
-      if token.text == ";" then
-        Except.ok ([], rest)
-      else do
-        let (body, remaining) ← takeDefinitionBody word line rest
-        Except.ok (token :: body, remaining)
-
 /-- Compile one source token into a runtime operation. -/
 def compileToken (token : SourceToken) : Op :=
   let trimmed := token.text.trimAscii.toString
@@ -279,29 +282,88 @@ mutual
     | op :: rest => do
         let nextState ← executeOp dict state op
         executeOps dict nextState rest
+end
 
-  /-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
-  partial def interpretTokens
-      (dict : RuntimeDictionary)
-      (opsRev : List Op)
-      : List SourceToken → Except RuntimeError (RuntimeDictionary × List Op)
-    | [] => Except.ok (dict, opsRev.reverse)
-    | token :: rest =>
-        if token.text == ":" then
+/-- Execute a token immediately while compiling a definition. -/
+partial def executeImmediateToken
+    (dict : RuntimeDictionary)
+    (state : DefinitionCompileState)
+    (token : SourceToken)
+    : Except RuntimeError DefinitionCompileState := do
+  let runtimeState ← executeOp dict { stack := state.compileStack, output := "" } (compileToken token)
+  Except.ok { state with compileStack := runtimeState.stack }
+
+/--
+Compile one token inside a colon definition. The definition ends only on a
+bare `;` while in compile mode, so `CHAR ;` remains legal inside `[ ... ]`.
+-/
+partial def compileDefinitionTokens
+    (dict : RuntimeDictionary)
+    (word : String)
+    (startLine : Nat)
+    (state : DefinitionCompileState)
+    : List SourceToken → Except RuntimeError (DefinitionCompileState × List SourceToken)
+  | [] => Except.error (.missingSemicolon word startLine)
+  | token :: rest =>
+      if state.immediateMode then
+        if token.text == "]" then
+          compileDefinitionTokens dict word startLine { state with immediateMode := false } rest
+        else if token.text == "CHAR" then
           match rest with
-          | [] => Except.error (.invalidDefinition token.line)
-          | nameTok :: remaining => do
-              let (body, afterDef) ← takeDefinitionBody nameTok.text nameTok.line remaining
-              let nextDict := defineWord dict nameTok.text (.compiled (compileTokens body))
-              interpretTokens nextDict opsRev afterDef
+          | [] => Except.error (.missingCharArgument token.line)
+          | charTok :: remaining =>
+              let charCode := Int.ofNat <| (charTok.text.toList.head?.getD default).toNat
+              compileDefinitionTokens dict word startLine
+                { state with compileStack := charCode :: state.compileStack } remaining
         else if token.text == ".\"" then
           match rest with
           | [] => Except.error (.unterminatedString token.line)
-          | textTok :: remaining =>
-              interpretTokens dict (.emitText textTok.text :: opsRev) remaining
-        else
-          interpretTokens dict (compileToken token :: opsRev) rest
-end
+          | _ :: _ => Except.error (.unknownWord ".\"" token.line)
+        else do
+          let nextState ← executeImmediateToken dict state token
+          compileDefinitionTokens dict word startLine nextState rest
+      else if token.text == ";" then
+        Except.ok (state, rest)
+      else if token.text == "[" then
+        compileDefinitionTokens dict word startLine { state with immediateMode := true } rest
+      else if token.text == "LITERAL" then
+        match state.compileStack with
+        | value :: compileStack =>
+            compileDefinitionTokens dict word startLine
+              { state with opsRev := .push value :: state.opsRev, compileStack := compileStack } rest
+        | [] => Except.error (.stackUnderflow "LITERAL" token.line)
+      else if token.text == ".\"" then
+        match rest with
+        | [] => Except.error (.unterminatedString token.line)
+        | textTok :: remaining =>
+            compileDefinitionTokens dict word startLine
+              { state with opsRev := .emitText textTok.text :: state.opsRev } remaining
+      else
+        compileDefinitionTokens dict word startLine
+          { state with opsRev := compileToken token :: state.opsRev } rest
+
+/-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
+partial def interpretTokens
+    (dict : RuntimeDictionary)
+    (opsRev : List Op)
+    : List SourceToken → Except RuntimeError (RuntimeDictionary × List Op)
+  | [] => Except.ok (dict, opsRev.reverse)
+  | token :: rest =>
+      if token.text == ":" then
+        match rest with
+        | [] => Except.error (.invalidDefinition token.line)
+        | nameTok :: remaining => do
+            let (compileState, afterDef) ←
+              compileDefinitionTokens dict nameTok.text nameTok.line initialDefinitionCompileState remaining
+            let nextDict := defineWord dict nameTok.text (.compiled compileState.opsRev.reverse)
+            interpretTokens nextDict opsRev afterDef
+      else if token.text == ".\"" then
+        match rest with
+        | [] => Except.error (.unterminatedString token.line)
+        | textTok :: remaining =>
+            interpretTokens dict (.emitText textTok.text :: opsRev) remaining
+      else
+        interpretTokens dict (compileToken token :: opsRev) rest
 
 /-- Evaluate a source program token by token from left to right. -/
 def evalRuntimeTokens (dict : RuntimeDictionary) (tokens : List SourceToken) : Except RuntimeError RuntimeState := do
