@@ -22,9 +22,12 @@ open LeanForth
 #guard fileLines "1 2 +\r\n3 4 +\r\n" == ["1 2 +", "3 4 +", ""]
 
 -- tokenizer ignores repeated whitespace and newlines
-#guard tokenizeRuntime "1  2\t+\n dup" == .ok ["1", "2", "+", "dup"]
-#guard tokenizeRuntime ".\" hello world\"" == .ok [".\"", "hello world"]
-#guard tokenizeRuntime "1 2 + \\ ignore this\n dup" == .ok ["1", "2", "+", "dup"]
+#guard tokenizeRuntime "1  2\t+\n dup" == .ok
+  [{ text := "1", line := 1 }, { text := "2", line := 1 }, { text := "+", line := 1 }, { text := "dup", line := 2 }]
+#guard tokenizeRuntime ".\" hello world\"" == .ok
+  [{ text := ".\"", line := 1 }, { text := "hello world", line := 1 }]
+#guard tokenizeRuntime "1 2 + \\ ignore this\n dup" == .ok
+  [{ text := "1", line := 1 }, { text := "2", line := 1 }, { text := "+", line := 1 }, { text := "dup", line := 2 }]
 
 -- built-in words are available through the initial dictionary
 #guard lookupWord initialDictionary "+" |>.isSome
@@ -32,7 +35,7 @@ open LeanForth
 #guard lookupWord initialDictionary "." |>.isSome
 #guard lookupWord initialDictionary "cr" |>.isSome
 #guard lookupWord initialDictionary "nope" |>.isNone
-#guard lookupWord (defineWord initialDictionary "sq" (.compiled [.call "dup", .call "*"])) "sq" |>.isSome
+#guard lookupWord (defineWord initialDictionary "sq" (.compiled [.call "dup" 1, .call "*" 1])) "sq" |>.isSome
 
 -- source programs are parsed and evaluated left-to-right
 #guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
@@ -60,12 +63,13 @@ open LeanForth
 #guard runRuntime ": sq dup * \\ square it\n ; 6 sq" == .ok { stack := [36], output := "" }
 
 -- unknown words and underflow now surface explicit interpreter errors
-#guard runRuntime "nope" == .error (.unknownWord "nope")
-#guard runRuntime "+" == .error (.stackUnderflow "+")
-#guard runRuntime "." == .error (.stackUnderflow ".")
-#guard runRuntime ":" == .error .invalidDefinition
-#guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq")
-#guard runRuntime ".\" hello" == .error .unterminatedString
+#guard runRuntime "nope" == .error (.unknownWord "nope" 1)
+#guard runRuntime "+" == .error (.stackUnderflow "+" 1)
+#guard runRuntime "." == .error (.stackUnderflow "." 1)
+#guard runRuntime ":" == .error (.invalidDefinition 1)
+#guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq" 1)
+#guard runRuntime ".\" hello" == .error (.unterminatedString 1)
+#guard runRuntime "1\n]" == .error (.unknownWord "]" 2)
 
 def main : IO Unit :=
   IO.println "All tests passed!"

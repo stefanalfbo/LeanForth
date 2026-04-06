@@ -8,7 +8,7 @@ def printResult (path : System.FilePath) : IO Unit := do
         IO.print state.output
       if !state.stack.isEmpty then
         IO.println s!"stack: {repr state.stack}"
-  | .error err => IO.eprintln s!"error: {repr err}"
+  | .error err => IO.eprintln s!"error: {LeanForth.formatRuntimeError err}"
 
 def main (args : List String) : IO Unit := do
   match args with
