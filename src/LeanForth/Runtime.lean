@@ -330,60 +330,56 @@ partial def compileDefinitionTokens
     : List SourceToken → Except RuntimeError (DefinitionCompileState × List SourceToken)
   | [] => Except.error (.missingSemicolon word startLine)
   | token :: rest =>
-      if state.immediateMode then
-        if token.text == "(" then
-          do
+      match state.immediateMode, token.text, rest with
+      | true, "(", _ => do
           let remaining ← dropCommentTokens token.line rest
           compileDefinitionTokens dict word startLine state remaining
-        else if token.text == "]" then
+      | true, "]", _ =>
           compileDefinitionTokens dict word startLine { state with immediateMode := false } rest
-        else if token.text == "CHAR" then
-          match rest with
-          | [] => Except.error (.missingCharArgument token.line)
-          | charTok :: remaining =>
-              let charCode := Int.ofNat <| (charTok.text.toList.head?.getD default).toNat
-              compileDefinitionTokens dict word startLine
-                { state with compileStack := charCode :: state.compileStack } remaining
-        else if token.text == ".\"" then
-          match rest with
-          | [] => Except.error (.unterminatedString token.line)
-          | _ :: _ => Except.error (.unknownWord ".\"" token.line)
-        else do
+      | true, "CHAR", [] =>
+          Except.error (.missingCharArgument token.line)
+      | true, "CHAR", charTok :: remaining =>
+          let charCode := Int.ofNat <| (charTok.text.toList.head?.getD default).toNat
+          compileDefinitionTokens dict word startLine
+            { state with compileStack := charCode :: state.compileStack } remaining
+      | true, ".\"", [] =>
+          Except.error (.unterminatedString token.line)
+      | true, ".\"", _ :: _ =>
+          Except.error (.unknownWord ".\"" token.line)
+      | true, _, _ => do
           let nextState ← executeImmediateToken dict state token
           compileDefinitionTokens dict word startLine nextState rest
-      else if token.text == ";" then
-        Except.ok (state, rest)
-      else if token.text == "IMMEDIATE" then
-        compileDefinitionTokens dict word startLine { state with definingWordImmediate := true } rest
-      else if token.text == "[COMPILE]" then
-        match rest with
-        | [] => Except.error (.unknownWord "[COMPILE]" token.line)
-        | nextTok :: remaining =>
-            compileDefinitionTokens dict word startLine (compileLiteralToken nextTok state) remaining
-      else if token.text == "[" then
-        compileDefinitionTokens dict word startLine { state with immediateMode := true } rest
-      else if token.text == "LITERAL" then
-        match state.compileStack with
-        | value :: compileStack =>
-            compileDefinitionTokens dict word startLine
-              { state with opsRev := .push value :: state.opsRev, compileStack := compileStack } rest
-        | [] => Except.error (.stackUnderflow "LITERAL" token.line)
-      else if token.text == ".\"" then
-        match rest with
-        | [] => Except.error (.unterminatedString token.line)
-        | textTok :: remaining =>
-            compileDefinitionTokens dict word startLine
-              { state with opsRev := .emitText textTok.text :: state.opsRev } remaining
-      else
-        match lookupEntry dict token.text with
-        | some entry =>
-            if entry.immediate then do
-              let nextState ← executeImmediateToken dict state token
-              compileDefinitionTokens dict word startLine nextState rest
-            else
+      | false, ";", _ =>
+          Except.ok (state, rest)
+      | false, "IMMEDIATE", _ =>
+          compileDefinitionTokens dict word startLine { state with definingWordImmediate := true } rest
+      | false, "[COMPILE]", [] =>
+          Except.error (.unknownWord "[COMPILE]" token.line)
+      | false, "[COMPILE]", nextTok :: remaining =>
+          compileDefinitionTokens dict word startLine (compileLiteralToken nextTok state) remaining
+      | false, "[", _ =>
+          compileDefinitionTokens dict word startLine { state with immediateMode := true } rest
+      | false, "LITERAL", _ =>
+          match state.compileStack with
+          | value :: compileStack =>
+              compileDefinitionTokens dict word startLine
+                { state with opsRev := .push value :: state.opsRev, compileStack := compileStack } rest
+          | [] => Except.error (.stackUnderflow "LITERAL" token.line)
+      | false, ".\"", [] =>
+          Except.error (.unterminatedString token.line)
+      | false, ".\"", textTok :: remaining =>
+          compileDefinitionTokens dict word startLine
+            { state with opsRev := .emitText textTok.text :: state.opsRev } remaining
+      | false, _, _ =>
+          match lookupEntry dict token.text with
+          | some entry =>
+              if entry.immediate then do
+                let nextState ← executeImmediateToken dict state token
+                compileDefinitionTokens dict word startLine nextState rest
+              else
+                compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
+          | none =>
               compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
-        | none =>
-            compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
 
 /-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
 partial def interpretTokens
