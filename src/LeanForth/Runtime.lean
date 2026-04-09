@@ -22,6 +22,7 @@ inductive Instruction where
 structure RuntimeState where
   stack : RuntimeStack
   output : String
+  here : Int := 0
   deriving Repr, DecidableEq, BEq
 
 /-- A token paired with its source line number. -/
@@ -109,6 +110,9 @@ def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) (imme
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
   { state with stack := n :: state.stack }
 
+/-- Address of the synthetic `HERE` cell exposed to the minimal runtime. -/
+def hereCellAddress : Int := -1
+
 /-- Append text to the output buffer. -/
 def appendOutput (state : RuntimeState) (text : String) : RuntimeState :=
   { state with output := state.output ++ text }
@@ -146,6 +150,17 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
     | "over", a :: b :: rest => Except.ok { state with stack := b :: a :: b :: rest }
     | ".", a :: rest => Except.ok <| appendOutput { state with stack := rest } (toString a)
     | "cr", _ => Except.ok <| appendOutput state "\n"
+    | "HERE", rest => Except.ok { state with stack := hereCellAddress :: rest }
+    | "@", addr :: rest =>
+        let value := if addr == hereCellAddress then state.here else addr
+        Except.ok { state with stack := value :: rest }
+    | "!", addr :: value :: rest =>
+        let state := if addr == hereCellAddress then { state with here := value } else state
+        Except.ok { state with stack := rest }
+    | "+!", addr :: delta :: rest =>
+        let state := if addr == hereCellAddress then { state with here := state.here + delta } else state
+        Except.ok { state with stack := rest }
+    | ",", _value :: rest => Except.ok { state with stack := rest, here := state.here + 1 }
     | "+", _ => Except.error (.stackUnderflow "+" line)
     | "-", _ => Except.error (.stackUnderflow "-" line)
     | "*", _ => Except.error (.stackUnderflow "*" line)
@@ -154,11 +169,15 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
     | "swap", _ => Except.error (.stackUnderflow "swap" line)
     | "over", _ => Except.error (.stackUnderflow "over" line)
     | ".", _ => Except.error (.stackUnderflow "." line)
+    | "@", _ => Except.error (.stackUnderflow "@" line)
+    | "!", _ => Except.error (.stackUnderflow "!" line)
+    | "+!", _ => Except.error (.stackUnderflow "+!" line)
+    | ",", _ => Except.error (.stackUnderflow "," line)
     | _, _ => Except.error (.unknownWord name line)
 
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
-  ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr"].map fun name =>
+  ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr", "HERE", "@", "!", "+!", ","].map fun name =>
     (name, { word := WordDef.prim (builtinWord name), immediate := false })
 
 /-- The empty initial machine state. -/
@@ -173,13 +192,14 @@ def initialRuntimeSession : RuntimeSession :=
 structure DefinitionCompileState where
   opsRev : List Op
   compileStack : RuntimeStack
+  compileHere : Int
   immediateMode : Bool
   definingWordImmediate : Bool
   deriving Repr, DecidableEq, BEq
 
 /-- The initial compile-time state for a colon definition. -/
 def initialDefinitionCompileState : DefinitionCompileState :=
-  { opsRev := [], compileStack := [], immediateMode := false, definingWordImmediate := false }
+  { opsRev := [], compileStack := [], compileHere := 0, immediateMode := false, definingWordImmediate := false }
 
 /-- Read a quoted string up to the next `"`, tracking line numbers. -/
 partial def takeQuotedChars (line : Nat) : List Char → Except RuntimeError (List Char × List Char × Nat)
@@ -320,12 +340,12 @@ partial def executeImmediateToken
     (state : DefinitionCompileState)
     (token : SourceToken)
     : Except RuntimeError DefinitionCompileState := do
-  let runtimeState ← executeOp dict { stack := state.compileStack, output := "" } (compileToken token)
-  Except.ok { state with compileStack := runtimeState.stack }
+  let runtimeState ← executeOp dict { stack := state.compileStack, output := "", here := state.compileHere } (compileToken token)
+  Except.ok { state with compileStack := runtimeState.stack, compileHere := runtimeState.here }
 
 /-- Compile a token as a call, even if the word is immediate. -/
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
-  { state with opsRev := compileToken token :: state.opsRev }
+  { state with opsRev := compileToken token :: state.opsRev, compileHere := state.compileHere + 1 }
 
 /--
 Compile one token inside a colon definition. The definition ends only on a
@@ -370,15 +390,19 @@ partial def compileDefinitionTokens
           compileDefinitionTokens dict word startLine { state with immediateMode := true } rest
       | false, "LITERAL", _ =>
           match state.compileStack with
-          | value :: compileStack =>
-              compileDefinitionTokens dict word startLine
-                { state with opsRev := .push value :: state.opsRev, compileStack := compileStack } rest
+          | value :: remainingStack =>
+              let nextState :=
+                { state with
+                    opsRev := .push value :: state.opsRev
+                    compileStack := remainingStack
+                    compileHere := state.compileHere + 1 }
+              compileDefinitionTokens dict word startLine nextState rest
           | [] => Except.error (.stackUnderflow "LITERAL" token.line)
       | false, ".\"", [] =>
           Except.error (.unterminatedString token.line)
       | false, ".\"", textTok :: remaining =>
           compileDefinitionTokens dict word startLine
-            { state with opsRev := .emitText textTok.text :: state.opsRev } remaining
+            { state with opsRev := .emitText textTok.text :: state.opsRev, compileHere := state.compileHere + 1 } remaining
       | false, _, _ =>
           match lookupEntry dict token.text with
           | some entry =>

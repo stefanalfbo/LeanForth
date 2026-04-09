@@ -34,6 +34,11 @@ open LeanForth
 #guard lookupWord initialDictionary "dup" |>.isSome
 #guard lookupWord initialDictionary "." |>.isSome
 #guard lookupWord initialDictionary "cr" |>.isSome
+#guard lookupWord initialDictionary "HERE" |>.isSome
+#guard lookupWord initialDictionary "@" |>.isSome
+#guard lookupWord initialDictionary "!" |>.isSome
+#guard lookupWord initialDictionary "+!" |>.isSome
+#guard lookupWord initialDictionary "," |>.isSome
 #guard lookupWord initialDictionary "nope" |>.isNone
 #guard lookupWord (defineWord initialDictionary "sq" (.compiled [.call "dup" 1, .call "*" 1])) "sq" |>.isSome
 
@@ -42,6 +47,10 @@ open LeanForth
 #guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
+#guard runRuntime "HERE @" == .ok { stack := [0], output := "", here := 0 }
+#guard runRuntime "12 HERE ! HERE @" == .ok { stack := [12], output := "", here := 12 }
+#guard runRuntime "3 HERE +! HERE @" == .ok { stack := [3], output := "", here := 3 }
+#guard runRuntime "99 ," == .ok { stack := [], output := "", here := 1 }
 #guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
   | .ok session => (lookupWord session.dict "sq").isSome && session.state == initialRuntimeState
   | .error _ => false
