@@ -177,8 +177,18 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
 
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
-  ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr", "HERE", "@", "!", "+!", ","].map fun name =>
-    (name, { word := WordDef.prim (builtinWord name), immediate := false })
+  let builtins := ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr", "HERE", "@", "!", "+!", ","]
+  let aliases :=
+    builtins.foldr (fun name acc =>
+      let upper := name.map Char.toUpper
+      if upper == name then
+        (name, { word := WordDef.prim (builtinWord name), immediate := false }) :: acc
+      else
+        (name, { word := WordDef.prim (builtinWord name), immediate := false }) ::
+        (upper, { word := WordDef.prim (builtinWord name), immediate := false }) ::
+        acc
+    ) []
+  aliases
 
 /-- The empty initial machine state. -/
 def initialRuntimeState : RuntimeState :=

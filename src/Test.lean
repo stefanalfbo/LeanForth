@@ -36,6 +36,9 @@ open LeanForth
 #guard lookupWord initialDictionary "dup" |>.isSome
 #guard lookupWord initialDictionary "." |>.isSome
 #guard lookupWord initialDictionary "cr" |>.isSome
+#guard lookupWord initialDictionary "SWAP" |>.isSome
+#guard lookupWord initialDictionary "DROP" |>.isSome
+#guard lookupWord initialDictionary "CR" |>.isSome
 #guard lookupWord initialDictionary "HERE" |>.isSome
 #guard lookupWord initialDictionary "@" |>.isSome
 #guard lookupWord initialDictionary "!" |>.isSome
@@ -46,6 +49,8 @@ open LeanForth
 
 -- source programs are parsed and evaluated left-to-right
 #guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
+#guard runRuntime "1 2 SWAP" == .ok { stack := [1, 2], output := "" }
+#guard runRuntime "7 DUP *" == .ok { stack := [49], output := "" }
 #guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
