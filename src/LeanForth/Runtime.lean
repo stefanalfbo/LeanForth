@@ -252,17 +252,25 @@ partial def tokenizeChars
         if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
       Except.ok acc.reverse
   | '.' :: '"' :: rest =>
-      let acc :=
-        if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
-      let (quoteLine, afterWhitespace) := dropLeadingWhitespace line rest
-      let (quoted, remaining, nextLine) ← takeQuotedChars quoteLine afterWhitespace
-      tokenizeChars remaining nextLine [] nextLine
-        ({ text := String.ofList quoted, line := quoteLine } :: { text := ".\"", line := line } :: acc)
+      if current.isEmpty then
+        let acc :=
+          if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
+        let (quoteLine, afterWhitespace) := dropLeadingWhitespace line rest
+        let (quoted, remaining, nextLine) ← takeQuotedChars quoteLine afterWhitespace
+        tokenizeChars remaining nextLine [] nextLine
+          ({ text := String.ofList quoted, line := quoteLine } :: { text := ".\"", line := line } :: acc)
+      else
+        let currentLine := if current.isEmpty then line else currentLine
+        tokenizeChars ('"' :: rest) line (current ++ ['.']) currentLine acc
   | '\\' :: rest =>
-      let acc :=
-        if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
-      let (nextLine, remaining) := dropLineComment line rest
-      tokenizeChars remaining nextLine [] nextLine acc
+      if current.isEmpty then
+        let acc :=
+          if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
+        let (nextLine, remaining) := dropLineComment line rest
+        tokenizeChars remaining nextLine [] nextLine acc
+      else
+        let currentLine := if current.isEmpty then line else currentLine
+        tokenizeChars rest line (current ++ ['\\']) currentLine acc
   | '\n' :: rest =>
       let acc :=
         if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
@@ -294,6 +302,10 @@ def compileToken (token : SourceToken) : Op :=
   match trimmed.toInt? with
   | some n => .push n
   | none => .call trimmed token.line
+
+/-- Encode a token as a stable synthetic execution token. -/
+def executionTokenOf (token : SourceToken) : Int :=
+  token.text.toList.foldl (fun acc ch => acc * 131 + Int.ofNat ch.toNat) 7
 
 /-- Skip tokenized `( ... )` comments up to and including the closing `)`. -/
 def dropCommentTokens (startLine : Nat) : List SourceToken → Except RuntimeError (List SourceToken)
@@ -347,6 +359,10 @@ partial def executeImmediateToken
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
   { state with opsRev := compileToken token :: state.opsRev, compileHere := state.compileHere + 1 }
 
+/-- Compile a literal execution token for the next parsed word. -/
+def compileExecutionToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
+  { state with opsRev := .push (executionTokenOf token) :: state.opsRev, compileHere := state.compileHere + 1 }
+
 /--
 Compile one token inside a colon definition. The definition ends only on a
 bare `;` while in compile mode, so `CHAR ;` remains legal inside `[ ... ]`.
@@ -386,6 +402,10 @@ partial def compileDefinitionTokens
           Except.error (.unknownWord "[COMPILE]" token.line)
       | false, "[COMPILE]", nextTok :: remaining =>
           compileDefinitionTokens dict word startLine (compileLiteralToken nextTok state) remaining
+      | false, "'", [] =>
+          Except.error (.stackUnderflow "'" token.line)
+      | false, "'", nextTok :: remaining =>
+          compileDefinitionTokens dict word startLine (compileExecutionToken nextTok state) remaining
       | false, "[", _ =>
           compileDefinitionTokens dict word startLine { state with immediateMode := true } rest
       | false, "LITERAL", _ =>
@@ -425,6 +445,11 @@ partial def interpretTokens
         do
         let remaining ← dropCommentTokens token.line rest
         interpretTokens dict opsRev remaining
+      else if token.text == "'" then
+        match rest with
+        | [] => Except.error (.stackUnderflow "'" token.line)
+        | nextTok :: remaining =>
+            interpretTokens dict (.push (executionTokenOf nextTok) :: opsRev) remaining
       else if token.text == ":" then
         match rest with
         | [] => Except.error (.invalidDefinition token.line)

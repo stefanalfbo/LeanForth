@@ -28,6 +28,8 @@ open LeanForth
   [{ text := ".\"", line := 1 }, { text := "hello world", line := 1 }]
 #guard tokenizeRuntime "1 2 + \\ ignore this\n dup" == .ok
   [{ text := "1", line := 1 }, { text := "2", line := 1 }, { text := "+", line := 1 }, { text := "dup", line := 2 }]
+#guard tokenizeRuntime ": '\\n' 10 ;" == .ok
+  [{ text := ":", line := 1 }, { text := "'\\n'", line := 1 }, { text := "10", line := 1 }, { text := ";", line := 1 }]
 
 -- built-in words are available through the initial dictionary
 #guard lookupWord initialDictionary "+" |>.isSome
@@ -51,6 +53,9 @@ open LeanForth
 #guard runRuntime "12 HERE ! HERE @" == .ok { stack := [12], output := "", here := 12 }
 #guard runRuntime "3 HERE +! HERE @" == .ok { stack := [3], output := "", here := 3 }
 #guard runRuntime "99 ," == .ok { stack := [], output := "", here := 1 }
+#guard match runRuntime "' foo" with
+  | .ok state => state.stack.length == 1
+  | .error _ => false
 #guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
   | .ok session => (lookupWord session.dict "sq").isSome && session.state == initialRuntimeState
   | .error _ => false
@@ -86,6 +91,9 @@ open LeanForth
 #guard runRuntime ": ':' [ CHAR : ] LITERAL ; ':'" == .ok { stack := [58], output := "" }
 #guard runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x" == .ok { stack := [5], output := "" }
 #guard runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y" == .ok { stack := [5], output := "" }
+#guard match runRuntime ": xt-word ' foo ; xt-word" with
+  | .ok state => state.stack.length == 1
+  | .error _ => false
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
@@ -96,6 +104,7 @@ open LeanForth
 #guard runRuntime ".\" hello" == .error (.unterminatedString 1)
 #guard runRuntime "( never closes" == .error (.unterminatedComment 1)
 #guard runRuntime ": x [ CHAR" == .error (.missingCharArgument 1)
+#guard runRuntime "'" == .error (.stackUnderflow "'" 1)
 #guard runRuntime "1\n]" == .error (.unknownWord "]" 2)
 
 def main : IO Unit :=
