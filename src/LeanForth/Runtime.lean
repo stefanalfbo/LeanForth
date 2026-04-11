@@ -150,6 +150,9 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
     | "over", a :: b :: rest => Except.ok { state with stack := b :: a :: b :: rest }
     | ".", a :: rest => Except.ok <| appendOutput { state with stack := rest } (toString a)
     | "cr", _ => Except.ok <| appendOutput state "\n"
+    | "KEY", rest => Except.ok { state with stack := 0 :: rest }
+    | "EMIT", ch :: rest =>
+        Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
     | "HERE", rest => Except.ok { state with stack := hereCellAddress :: rest }
     | "@", addr :: rest =>
         let value := if addr == hereCellAddress then state.here else addr
@@ -169,6 +172,7 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
     | "swap", _ => Except.error (.stackUnderflow "swap" line)
     | "over", _ => Except.error (.stackUnderflow "over" line)
     | ".", _ => Except.error (.stackUnderflow "." line)
+    | "EMIT", _ => Except.error (.stackUnderflow "EMIT" line)
     | "@", _ => Except.error (.stackUnderflow "@" line)
     | "!", _ => Except.error (.stackUnderflow "!" line)
     | "+!", _ => Except.error (.stackUnderflow "+!" line)
@@ -177,7 +181,7 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
 
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
-  let builtins := ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr", "HERE", "@", "!", "+!", ","]
+  let builtins := ["+", "-", "*", "dup", "drop", "swap", "over", ".", "cr", "KEY", "EMIT", "HERE", "@", "!", "+!", ","]
   let aliases :=
     builtins.foldr (fun name acc =>
       let upper := name.map Char.toUpper
