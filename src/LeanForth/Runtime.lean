@@ -7,17 +7,6 @@ The head of the list is the top of the stack.
 -/
 abbrev RuntimeStack := List Int
 
-/-- Backward-compatible alias for the old evaluator API. -/
-abbrev Stack := RuntimeStack
-
-/-- A small instruction language for low-level tests and direct execution. -/
-inductive Instruction where
-  | Push (n : Int)
-  | Add
-  | Sub
-  | Mul
-  deriving Repr, DecidableEq
-
 /-- The current machine state. -/
 structure RuntimeState where
   stack : RuntimeStack
@@ -115,26 +104,6 @@ def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
 /-- Append text to the output buffer. -/
 def appendOutput (state : RuntimeState) (text : String) : RuntimeState :=
   { state with output := state.output ++ text }
-
-/-- Execute one low-level instruction against a stack. -/
-def executeInstruction (stack : Stack) : Instruction → Stack
-  | .Push n => n :: stack
-  | .Add =>
-      match stack with
-      | a :: b :: rest => (b + a) :: rest
-      | _ => stack
-  | .Sub =>
-      match stack with
-      | a :: b :: rest => (b - a) :: rest
-      | _ => stack
-  | .Mul =>
-      match stack with
-      | a :: b :: rest => (b * a) :: rest
-      | _ => stack
-
-/-- Evaluate a low-level instruction sequence from an empty stack. -/
-def eval (instructions : List Instruction) : Stack :=
-  instructions.foldl executeInstruction []
 
 /-- Function type for built-in primitive words. -/
 abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeState
