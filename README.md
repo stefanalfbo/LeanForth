@@ -31,3 +31,4 @@ The test file uses `#guard` assertions to validate the evaluator. If all checks 
 
 * [Implementing a Forth](https://ratfactor.com/forth/implementing)
 * [forth-documents](https://github.com/larsbrinkhoff/forth-documents)
+* [forth2012-test-suite](https://github.com/gerryjackson/forth2012-test-suite)
