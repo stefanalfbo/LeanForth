@@ -351,17 +351,6 @@ def dropCommentTokens (startLine : Nat) : List SourceToken → Except RuntimeErr
       else
         dropCommentTokens startLine rest
 
-/-- Compile a token list into runtime operations. -/
-def compileTokens : List SourceToken → List Op
-  | [] => []
-  | token :: text :: rest =>
-      if token.text == ".\"" then
-        .emitText text.text :: compileTokens rest
-      else
-        compileToken token :: compileTokens (text :: rest)
-  | [token] =>
-      [compileToken token]
-
 mutual
   /-- Execute one compiled operation. -/
   partial def executeOp (dict : RuntimeDictionary) (state : RuntimeState) : Op → Except RuntimeError RuntimeState
