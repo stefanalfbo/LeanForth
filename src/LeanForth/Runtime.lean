@@ -297,8 +297,6 @@ partial def tokenizeChars
       Except.ok acc.reverse
   | '.' :: '"' :: rest =>
       if current.isEmpty then
-        let acc :=
-          if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
         let (quoteLine, afterWhitespace) := dropLeadingWhitespace line rest
         let (quoted, remaining, nextLine) ← takeQuotedChars quoteLine afterWhitespace
         tokenizeChars remaining nextLine [] nextLine
