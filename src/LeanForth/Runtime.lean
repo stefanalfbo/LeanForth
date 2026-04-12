@@ -136,71 +136,114 @@ def executeInstruction (stack : Stack) : Instruction → Stack
 def eval (instructions : List Instruction) : Stack :=
   instructions.foldl executeInstruction []
 
+/-- Function type for built-in primitive words. -/
+abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeState
+
 /-- Built-in arithmetic, stack, and output words. -/
-def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError RuntimeState :=
-  fun line state =>
-    match name, state.stack with
-    | "+", a :: b :: rest => Except.ok { state with stack := (b + a) :: rest }
-    | "-", a :: b :: rest => Except.ok { state with stack := (b - a) :: rest }
-    | "*", a :: b :: rest => Except.ok { state with stack := (b * a) :: rest }
-    | "=", a :: b :: rest => Except.ok { state with stack := (if b == a then 1 else 0) :: rest }
-    | "1+", a :: rest => Except.ok { state with stack := (a + 1) :: rest }
-    | "1-", a :: rest => Except.ok { state with stack := (a - 1) :: rest }
-    | "dup", a :: rest => Except.ok { state with stack := a :: a :: rest }
-    | "drop", _ :: rest => Except.ok { state with stack := rest }
-    | "swap", a :: b :: rest => Except.ok { state with stack := b :: a :: rest }
-    | "over", a :: b :: rest => Except.ok { state with stack := b :: a :: b :: rest }
-    | ".", a :: rest => Except.ok <| appendOutput { state with stack := rest } (toString a)
-    | "cr", _ => Except.ok <| appendOutput state "\n"
-    | "KEY", rest => Except.ok { state with stack := 0 :: rest }
-    | "EMIT", ch :: rest =>
-        Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
-    | "HERE", rest => Except.ok { state with stack := state.here :: rest }
-    | "@", addr :: rest =>
-        if addr == state.here then
-          Except.ok { state with stack := state.here :: rest }
-        else
-          Except.error (.invalidAddress addr line)
-    | "!", addr :: value :: rest =>
-        if addr == state.here then
-          Except.ok { state with here := value, stack := rest }
-        else
-          Except.error (.invalidAddress addr line)
-    | "+!", addr :: delta :: rest =>
-        if addr == state.here then
-          Except.ok { state with here := state.here + delta, stack := rest }
-        else
-          Except.error (.invalidAddress addr line)
-    | ",", _value :: rest => Except.ok { state with stack := rest, here := state.here + 1 }
-    | "+", _ => Except.error (.stackUnderflow "+" line)
-    | "-", _ => Except.error (.stackUnderflow "-" line)
-    | "*", _ => Except.error (.stackUnderflow "*" line)
-    | "=", _ => Except.error (.stackUnderflow "=" line)
-    | "1+", _ => Except.error (.stackUnderflow "1+" line)
-    | "1-", _ => Except.error (.stackUnderflow "1-" line)
-    | "dup", _ => Except.error (.stackUnderflow "dup" line)
-    | "drop", _ => Except.error (.stackUnderflow "drop" line)
-    | "swap", _ => Except.error (.stackUnderflow "swap" line)
-    | "over", _ => Except.error (.stackUnderflow "over" line)
-    | ".", _ => Except.error (.stackUnderflow "." line)
-    | "EMIT", _ => Except.error (.stackUnderflow "EMIT" line)
-    | "@", _ => Except.error (.stackUnderflow "@" line)
-    | "!", _ => Except.error (.stackUnderflow "!" line)
-    | "+!", _ => Except.error (.stackUnderflow "+!" line)
-    | ",", _ => Except.error (.stackUnderflow "," line)
-    | _, _ => Except.error (.unknownWord name line)
+def builtinDefs : List (String × BuiltinHandler) :=
+  [ ("+", fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := (b + a) :: rest }
+      | _ => Except.error (.stackUnderflow "+" line))
+  , ("-", fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := (b - a) :: rest }
+      | _ => Except.error (.stackUnderflow "-" line))
+  , ("*", fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := (b * a) :: rest }
+      | _ => Except.error (.stackUnderflow "*" line))
+  , ("=", fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := (if b == a then 1 else 0) :: rest }
+      | _ => Except.error (.stackUnderflow "=" line))
+  , ("1+", fun line state =>
+      match state.stack with
+      | a :: rest => Except.ok { state with stack := (a + 1) :: rest }
+      | _ => Except.error (.stackUnderflow "1+" line))
+  , ("1-", fun line state =>
+      match state.stack with
+      | a :: rest => Except.ok { state with stack := (a - 1) :: rest }
+      | _ => Except.error (.stackUnderflow "1-" line))
+  , ("dup", fun line state =>
+      match state.stack with
+      | a :: rest => Except.ok { state with stack := a :: a :: rest }
+      | _ => Except.error (.stackUnderflow "dup" line))
+  , ("drop", fun line state =>
+      match state.stack with
+      | _ :: rest => Except.ok { state with stack := rest }
+      | _ => Except.error (.stackUnderflow "drop" line))
+  , ("swap", fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := b :: a :: rest }
+      | _ => Except.error (.stackUnderflow "swap" line))
+  , ("over", fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := b :: a :: b :: rest }
+      | _ => Except.error (.stackUnderflow "over" line))
+  , (".", fun line state =>
+      match state.stack with
+      | a :: rest => Except.ok <| appendOutput { state with stack := rest } (toString a)
+      | _ => Except.error (.stackUnderflow "." line))
+  , ("cr", fun _ state => Except.ok <| appendOutput state "\n")
+  , ("KEY", fun _ state => Except.ok { state with stack := 0 :: state.stack })
+  , ("EMIT", fun line state =>
+      match state.stack with
+      | ch :: rest =>
+          Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
+      | _ => Except.error (.stackUnderflow "EMIT" line))
+  , ("HERE", fun _ state => Except.ok { state with stack := state.here :: state.stack })
+  , ("@", fun line state =>
+      match state.stack with
+      | addr :: rest =>
+          if addr == state.here then
+            Except.ok { state with stack := state.here :: rest }
+          else
+            Except.error (.invalidAddress addr line)
+      | _ => Except.error (.stackUnderflow "@" line))
+  , ("!", fun line state =>
+      match state.stack with
+      | addr :: value :: rest =>
+          if addr == state.here then
+            Except.ok { state with here := value, stack := rest }
+          else
+            Except.error (.invalidAddress addr line)
+      | _ => Except.error (.stackUnderflow "!" line))
+  , ("+!", fun line state =>
+      match state.stack with
+      | addr :: delta :: rest =>
+          if addr == state.here then
+            Except.ok { state with here := state.here + delta, stack := rest }
+          else
+            Except.error (.invalidAddress addr line)
+      | _ => Except.error (.stackUnderflow "+!" line))
+  , (",", fun line state =>
+      match state.stack with
+      | _value :: rest => Except.ok { state with stack := rest, here := state.here + 1 }
+      | _ => Except.error (.stackUnderflow "," line))
+  ]
+
+/-- Find a built-in primitive by name. -/
+def lookupBuiltin (name : String) : Option BuiltinHandler :=
+  match builtinDefs with
+  | [] => none
+  | _ =>
+      let rec go : List (String × BuiltinHandler) → Option BuiltinHandler
+        | [] => none
+        | (entryName, handler) :: rest =>
+            if entryName == name then some handler else go rest
+      go builtinDefs
 
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
-  let builtins := ["+", "-", "*", "=", "1+", "1-", "dup", "drop", "swap", "over", ".", "cr", "KEY", "EMIT", "HERE", "@", "!", "+!", ","]
   let aliases :=
-    builtins.foldr (fun name acc =>
+    builtinDefs.foldr (fun (name, handler) acc =>
       let upper := name.map Char.toUpper
       if upper == name then
-        (name, { word := WordDef.prim (builtinWord name), immediate := false }) :: acc
+        (name, { word := WordDef.prim handler, immediate := false }) :: acc
       else
-        (name, { word := WordDef.prim (builtinWord name), immediate := false }) ::
-        (upper, { word := WordDef.prim (builtinWord name), immediate := false }) ::
+        (name, { word := WordDef.prim handler, immediate := false }) ::
+        (upper, { word := WordDef.prim handler, immediate := false }) ::
         acc
     ) []
   aliases
