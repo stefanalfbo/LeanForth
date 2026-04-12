@@ -63,9 +63,8 @@ open LeanForth
 #guard runRuntime "12 HERE ! HERE @" == .ok { stack := [12], output := "", here := 12 }
 #guard runRuntime "3 HERE +! HERE @" == .ok { stack := [3], output := "", here := 3 }
 #guard runRuntime "99 ," == .ok { stack := [], output := "", here := 1 }
-#guard match runRuntime "' foo" with
-  | .ok state => state.stack.length == 1
-  | .error _ => false
+#guard runRuntime "' dup ' DUP =" == .ok { stack := [1], output := "" }
+#guard runRuntime "' dup ' swap =" == .ok { stack := [0], output := "" }
 #guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
   | .ok session => (lookupWord session.dict "sq").isSome && session.state == initialRuntimeState
   | .error _ => false
@@ -102,9 +101,7 @@ open LeanForth
 #guard runRuntime ": ':' [ CHAR : ] LITERAL ; ':'" == .ok { stack := [58], output := "" }
 #guard runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x" == .ok { stack := [5], output := "" }
 #guard runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y" == .ok { stack := [5], output := "" }
-#guard match runRuntime ": xt-word ' foo ; xt-word" with
-  | .ok state => state.stack.length == 1
-  | .error _ => false
+#guard runRuntime ": xt-word ' dup ; xt-word ' DUP =" == .ok { stack := [1], output := "" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)

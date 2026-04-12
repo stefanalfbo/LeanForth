@@ -48,6 +48,7 @@ inductive WordDef where
 structure DictEntry where
   word : WordDef
   immediate : Bool
+  xt : Int
 
 /-- The active dictionary maps names to primitive or compiled words. -/
 abbrev RuntimeDictionary := List (String × DictEntry)
@@ -94,8 +95,13 @@ def lookupWord (dict : RuntimeDictionary) (name : String) : Option WordDef :=
   (lookupEntry dict name).map DictEntry.word
 
 /-- Add or shadow a dictionary entry. -/
+def nextExecutionToken (dict : RuntimeDictionary) : Int :=
+  dict.foldl (fun acc (_, entry) => max acc (entry.xt + 1)) 1
+
+/-- Add or shadow a dictionary entry. -/
 def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) (immediate := false) : RuntimeDictionary :=
-  (name, { word := word, immediate := immediate }) :: dict
+  let xt := nextExecutionToken dict
+  (name, { word := word, immediate := immediate, xt := xt }) :: dict
 
 /-- Push a value onto the stack. -/
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
@@ -207,12 +213,13 @@ def lookupBuiltin (name : String) : Option BuiltinHandler :=
 def initialDictionary : RuntimeDictionary :=
   let aliases :=
     builtinDefs.foldr (fun (name, handler) acc =>
+      let xt := acc.foldl (fun n (_, entry) => max n (entry.xt + 1)) 1
       let upper := name.map Char.toUpper
       if upper == name then
-        (name, { word := WordDef.prim handler, immediate := false }) :: acc
+        (name, { word := WordDef.prim handler, immediate := false, xt := xt }) :: acc
       else
-        (name, { word := WordDef.prim handler, immediate := false }) ::
-        (upper, { word := WordDef.prim handler, immediate := false }) ::
+        (name, { word := WordDef.prim handler, immediate := false, xt := xt }) ::
+        (upper, { word := WordDef.prim handler, immediate := false, xt := xt }) ::
         acc
     ) []
   aliases
@@ -340,9 +347,11 @@ def compileToken (token : SourceToken) : Op :=
   | some n => .push n
   | none => .call trimmed token.line
 
-/-- Encode a token as a stable synthetic execution token. -/
-def executionTokenOf (token : SourceToken) : Int :=
-  token.text.toList.foldl (fun acc ch => acc * 131 + Int.ofNat ch.toNat) 7
+/-- Lookup the execution token for a word already present in the dictionary. -/
+def executionTokenOf (dict : RuntimeDictionary) (token : SourceToken) : Except RuntimeError Int :=
+  match lookupEntry dict token.text with
+  | some entry => Except.ok entry.xt
+  | none => Except.error (.unknownWord token.text token.line)
 
 /-- Skip tokenized `( ... )` comments up to and including the closing `)`. -/
 def dropCommentTokens (startLine : Nat) : List SourceToken → Except RuntimeError (List SourceToken)
@@ -397,8 +406,10 @@ def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) :
   { state with opsRev := compileToken token :: state.opsRev, compileHere := state.compileHere + 1 }
 
 /-- Compile a literal execution token for the next parsed word. -/
-def compileExecutionToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
-  { state with opsRev := .push (executionTokenOf token) :: state.opsRev, compileHere := state.compileHere + 1 }
+def compileExecutionToken (dict : RuntimeDictionary) (token : SourceToken) (state : DefinitionCompileState)
+    : Except RuntimeError DefinitionCompileState := do
+  let xt ← executionTokenOf dict token
+  Except.ok { state with opsRev := .push xt :: state.opsRev, compileHere := state.compileHere + 1 }
 
 /--
 Compile one token inside a colon definition. The definition ends only on a
@@ -444,8 +455,9 @@ partial def compileDefinitionTokens
           compileDefinitionTokens dict word startLine (compileLiteralToken nextTok state) remaining
       | false, "'", [] =>
           Except.error (.stackUnderflow "'" token.line)
-      | false, "'", nextTok :: remaining =>
-          compileDefinitionTokens dict word startLine (compileExecutionToken nextTok state) remaining
+      | false, "'", nextTok :: remaining => do
+          let nextState ← compileExecutionToken dict nextTok state
+          compileDefinitionTokens dict word startLine nextState remaining
       | false, "[", _ =>
           compileDefinitionTokens dict word startLine { state with immediateMode := true } rest
       | false, "LITERAL", _ =>
@@ -488,8 +500,9 @@ partial def interpretTokens
       else if token.text == "'" then
         match rest with
         | [] => Except.error (.stackUnderflow "'" token.line)
-        | nextTok :: remaining =>
-            interpretTokens dict (.push (executionTokenOf nextTok) :: opsRev) remaining
+        | nextTok :: remaining => do
+            let xt ← executionTokenOf dict nextTok
+            interpretTokens dict (.push xt :: opsRev) remaining
       else if token.text == ":" then
         match rest with
         | [] => Except.error (.invalidDefinition token.line)
