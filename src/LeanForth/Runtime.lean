@@ -112,9 +112,6 @@ def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) (imme
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
   { state with stack := n :: state.stack }
 
-/-- Address of the synthetic `HERE` cell exposed to the minimal runtime. -/
-def hereCellAddress : Int := -1
-
 /-- Append text to the output buffer. -/
 def appendOutput (state : RuntimeState) (text : String) : RuntimeState :=
   { state with output := state.output ++ text }
@@ -158,19 +155,19 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
     | "KEY", rest => Except.ok { state with stack := 0 :: rest }
     | "EMIT", ch :: rest =>
         Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
-    | "HERE", rest => Except.ok { state with stack := hereCellAddress :: rest }
+    | "HERE", rest => Except.ok { state with stack := state.here :: rest }
     | "@", addr :: rest =>
-        if addr == hereCellAddress then
+        if addr == state.here then
           Except.ok { state with stack := state.here :: rest }
         else
           Except.error (.invalidAddress addr line)
     | "!", addr :: value :: rest =>
-        if addr == hereCellAddress then
+        if addr == state.here then
           Except.ok { state with here := value, stack := rest }
         else
           Except.error (.invalidAddress addr line)
     | "+!", addr :: delta :: rest =>
-        if addr == hereCellAddress then
+        if addr == state.here then
           Except.ok { state with here := state.here + delta, stack := rest }
         else
           Except.error (.invalidAddress addr line)
