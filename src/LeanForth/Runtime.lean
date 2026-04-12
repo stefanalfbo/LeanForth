@@ -290,11 +290,14 @@ partial def tokenizeChars
     (currentLine : Nat)
     (acc : List SourceToken)
     : Except RuntimeError (List SourceToken) := do
+  let flushCurrent :=
+    if current.isEmpty then
+      acc
+    else
+      { text := String.ofList current.reverse, line := currentLine } :: acc
   match chars with
   | [] =>
-      let acc :=
-        if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
-      Except.ok acc.reverse
+      Except.ok flushCurrent.reverse
   | '.' :: '"' :: rest =>
       if current.isEmpty then
         let (quoteLine, afterWhitespace) := dropLeadingWhitespace line rest
@@ -303,36 +306,26 @@ partial def tokenizeChars
           ({ text := String.ofList quoted, line := quoteLine } :: { text := ".\"", line := line } :: acc)
       else
         let currentLine := if current.isEmpty then line else currentLine
-        tokenizeChars ('"' :: rest) line (current ++ ['.']) currentLine acc
+        tokenizeChars ('"' :: rest) line ('.' :: current) currentLine acc
   | '\\' :: rest =>
       if current.isEmpty then
-        let acc :=
-          if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
         let (nextLine, remaining) := dropLineComment line rest
         tokenizeChars remaining nextLine [] nextLine acc
       else
         let currentLine := if current.isEmpty then line else currentLine
-        tokenizeChars rest line (current ++ ['\\']) currentLine acc
+        tokenizeChars rest line ('\\' :: current) currentLine acc
   | '\n' :: rest =>
-      let acc :=
-        if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
-      tokenizeChars rest (line + 1) [] (line + 1) acc
+      tokenizeChars rest (line + 1) [] (line + 1) flushCurrent
   | '\r' :: '\n' :: rest =>
-      let acc :=
-        if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
-      tokenizeChars rest (line + 1) [] (line + 1) acc
+      tokenizeChars rest (line + 1) [] (line + 1) flushCurrent
   | '\r' :: rest =>
-      let acc :=
-        if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
-      tokenizeChars rest (line + 1) [] (line + 1) acc
+      tokenizeChars rest (line + 1) [] (line + 1) flushCurrent
   | ch :: rest =>
       if ch.isWhitespace then
-        let acc :=
-          if current.isEmpty then acc else { text := String.ofList current, line := currentLine } :: acc
-        tokenizeChars rest line [] line acc
+        tokenizeChars rest line [] line flushCurrent
       else
         let currentLine := if current.isEmpty then line else currentLine
-        tokenizeChars rest line (current ++ [ch]) currentLine acc
+        tokenizeChars rest line (ch :: current) currentLine acc
 
 /-- Split source text into runtime tokens. -/
 def tokenizeRuntime (source : String) : Except RuntimeError (List SourceToken) :=
