@@ -111,6 +111,12 @@ def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
 def appendOutput (state : RuntimeState) (text : String) : RuntimeState :=
   { state with output := state.output ++ text }
 
+/--
+A dedicated address designator for the synthetic HERE cell.
+This is fixed for identity comparisons and does not vary with the current `here` value.
+-/
+def hereAddress : Int := -314159265
+
 /-- Function type for built-in primitive words. -/
 abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeState
 
@@ -167,12 +173,12 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | ch :: rest =>
           Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
       | _ => Except.error (.stackUnderflow "EMIT" line))
-  , ("HERE", fun _ state => Except.ok { state with stack := state.here :: state.stack })
+  , ("HERE", fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , ("LIT", fun _ state => Except.ok state)
   , ("@", fun line state =>
       match state.stack with
       | addr :: rest =>
-          if addr == state.here then
+          if addr == hereAddress then
             Except.ok { state with stack := state.here :: rest }
           else
             Except.error (.invalidAddress addr line)
@@ -180,7 +186,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
   , ("!", fun line state =>
       match state.stack with
       | addr :: value :: rest =>
-          if addr == state.here then
+          if addr == hereAddress then
             Except.ok { state with here := value, stack := rest }
           else
             Except.error (.invalidAddress addr line)
@@ -188,7 +194,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
   , ("+!", fun line state =>
       match state.stack with
       | addr :: delta :: rest =>
-          if addr == state.here then
+          if addr == hereAddress then
             Except.ok { state with here := state.here + delta, stack := rest }
           else
             Except.error (.invalidAddress addr line)
