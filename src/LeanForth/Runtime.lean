@@ -177,6 +177,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | _ => Except.error (.stackUnderflow "EMIT" line))
   , ("HERE", fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , ("LIT", fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
+  , ("BRANCH", fun line _ => Except.error (.invalidPrimitiveUse "BRANCH" line))
+  , ("0BRANCH", fun line _ => Except.error (.invalidPrimitiveUse "0BRANCH" line))
   , ("@", fun line state =>
       match state.stack with
       | addr :: rest =>

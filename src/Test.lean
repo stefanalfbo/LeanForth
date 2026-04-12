@@ -42,6 +42,8 @@ def fileLines (contents : String) : List String :=
 #guard lookupWord initialDictionary "EMIT" |>.isSome
 #guard lookupWord initialDictionary "HERE" |>.isSome
 #guard lookupWord initialDictionary "LIT" |>.isSome
+#guard lookupWord initialDictionary "BRANCH" |>.isSome
+#guard lookupWord initialDictionary "0BRANCH" |>.isSome
 #guard lookupWord initialDictionary "@" |>.isSome
 #guard lookupWord initialDictionary "!" |>.isSome
 #guard lookupWord initialDictionary "+!" |>.isSome
@@ -111,6 +113,8 @@ def fileLines (contents : String) : List String :=
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
 #guard runRuntime "LIT" == .error (.invalidPrimitiveUse "LIT" 1)
+#guard runRuntime "BRANCH" == .error (.invalidPrimitiveUse "BRANCH" 1)
+#guard runRuntime "0BRANCH" == .error (.invalidPrimitiveUse "0BRANCH" 1)
 #guard runRuntime "+" == .error (.stackUnderflow "+" 1)
 #guard runRuntime "=" == .error (.stackUnderflow "=" 1)
 #guard runRuntime "1+" == .error (.stackUnderflow "1+" 1)
