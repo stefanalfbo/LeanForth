@@ -207,17 +207,6 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | _ => Except.error (.stackUnderflow "," line))
   ]
 
-/-- Find a built-in primitive by name. -/
-def lookupBuiltin (name : String) : Option BuiltinHandler :=
-  match builtinDefs with
-  | [] => none
-  | _ =>
-      let rec go : List (String × BuiltinHandler) → Option BuiltinHandler
-        | [] => none
-        | (entryName, handler) :: rest =>
-            if entryName == name then some handler else go rest
-      go builtinDefs
-
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
   let aliases :=
