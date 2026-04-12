@@ -40,6 +40,7 @@ inductive RuntimeError where
   | unterminatedString (line : Nat)
   | unterminatedComment (line : Nat)
   | missingCharArgument (line : Nat)
+  | invalidAddress (addr : Int) (line : Nat)
   deriving Repr, DecidableEq, BEq
 
 /-- Compiled operations for user-defined words and top-level code. -/
@@ -90,6 +91,7 @@ def formatRuntimeError : RuntimeError → String
   | .unterminatedString line => s!"line {line}: unterminated string"
   | .unterminatedComment line => s!"line {line}: unterminated comment"
   | .missingCharArgument line => s!"line {line}: `CHAR` requires a following token"
+  | .invalidAddress addr line => s!"line {line}: invalid address {addr}"
 
 /-- Find a dictionary entry by word name. -/
 def lookupEntry (dict : RuntimeDictionary) (name : String) : Option DictEntry :=
@@ -158,14 +160,20 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
         Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
     | "HERE", rest => Except.ok { state with stack := hereCellAddress :: rest }
     | "@", addr :: rest =>
-        let value := if addr == hereCellAddress then state.here else addr
-        Except.ok { state with stack := value :: rest }
+        if addr == hereCellAddress then
+          Except.ok { state with stack := state.here :: rest }
+        else
+          Except.error (.invalidAddress addr line)
     | "!", addr :: value :: rest =>
-        let state := if addr == hereCellAddress then { state with here := value } else state
-        Except.ok { state with stack := rest }
+        if addr == hereCellAddress then
+          Except.ok { state with here := value, stack := rest }
+        else
+          Except.error (.invalidAddress addr line)
     | "+!", addr :: delta :: rest =>
-        let state := if addr == hereCellAddress then { state with here := state.here + delta } else state
-        Except.ok { state with stack := rest }
+        if addr == hereCellAddress then
+          Except.ok { state with here := state.here + delta, stack := rest }
+        else
+          Except.error (.invalidAddress addr line)
     | ",", _value :: rest => Except.ok { state with stack := rest, here := state.here + 1 }
     | "+", _ => Except.error (.stackUnderflow "+" line)
     | "-", _ => Except.error (.stackUnderflow "-" line)
