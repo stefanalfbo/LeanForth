@@ -40,6 +40,8 @@ open LeanForth
 #guard lookupWord initialDictionary "DROP" |>.isSome
 #guard lookupWord initialDictionary "CR" |>.isSome
 #guard lookupWord initialDictionary "=" |>.isSome
+#guard lookupWord initialDictionary "1+" |>.isSome
+#guard lookupWord initialDictionary "1-" |>.isSome
 #guard lookupWord initialDictionary "KEY" |>.isSome
 #guard lookupWord initialDictionary "EMIT" |>.isSome
 #guard lookupWord initialDictionary "HERE" |>.isSome
@@ -56,6 +58,8 @@ open LeanForth
 #guard runRuntime "7 DUP *" == .ok { stack := [49], output := "" }
 #guard runRuntime "3 3 =" == .ok { stack := [1], output := "" }
 #guard runRuntime "3 4 =" == .ok { stack := [0], output := "" }
+#guard runRuntime "41 1+" == .ok { stack := [42], output := "" }
+#guard runRuntime "41 1-" == .ok { stack := [40], output := "" }
 #guard runRuntime "KEY" == .ok { stack := [0], output := "", here := 0 }
 #guard runRuntime "65 EMIT" == .ok { stack := [], output := "A", here := 0 }
 #guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
@@ -111,6 +115,8 @@ open LeanForth
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
 #guard runRuntime "+" == .error (.stackUnderflow "+" 1)
 #guard runRuntime "=" == .error (.stackUnderflow "=" 1)
+#guard runRuntime "1+" == .error (.stackUnderflow "1+" 1)
+#guard runRuntime "1-" == .error (.stackUnderflow "1-" 1)
 #guard runRuntime "." == .error (.stackUnderflow "." 1)
 #guard runRuntime ":" == .error (.invalidDefinition 1)
 #guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq" 1)

@@ -145,6 +145,8 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
     | "-", a :: b :: rest => Except.ok { state with stack := (b - a) :: rest }
     | "*", a :: b :: rest => Except.ok { state with stack := (b * a) :: rest }
     | "=", a :: b :: rest => Except.ok { state with stack := (if b == a then 1 else 0) :: rest }
+    | "1+", a :: rest => Except.ok { state with stack := (a + 1) :: rest }
+    | "1-", a :: rest => Except.ok { state with stack := (a - 1) :: rest }
     | "dup", a :: rest => Except.ok { state with stack := a :: a :: rest }
     | "drop", _ :: rest => Except.ok { state with stack := rest }
     | "swap", a :: b :: rest => Except.ok { state with stack := b :: a :: rest }
@@ -169,6 +171,8 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
     | "-", _ => Except.error (.stackUnderflow "-" line)
     | "*", _ => Except.error (.stackUnderflow "*" line)
     | "=", _ => Except.error (.stackUnderflow "=" line)
+    | "1+", _ => Except.error (.stackUnderflow "1+" line)
+    | "1-", _ => Except.error (.stackUnderflow "1-" line)
     | "dup", _ => Except.error (.stackUnderflow "dup" line)
     | "drop", _ => Except.error (.stackUnderflow "drop" line)
     | "swap", _ => Except.error (.stackUnderflow "swap" line)
@@ -183,7 +187,7 @@ def builtinWord (name : String) : Nat → RuntimeState → Except RuntimeError R
 
 /-- The initial dictionary of built-in words. -/
 def initialDictionary : RuntimeDictionary :=
-  let builtins := ["+", "-", "*", "=", "dup", "drop", "swap", "over", ".", "cr", "KEY", "EMIT", "HERE", "@", "!", "+!", ","]
+  let builtins := ["+", "-", "*", "=", "1+", "1-", "dup", "drop", "swap", "over", ".", "cr", "KEY", "EMIT", "HERE", "@", "!", "+!", ","]
   let aliases :=
     builtins.foldr (fun name acc =>
       let upper := name.map Char.toUpper
