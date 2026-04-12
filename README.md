@@ -21,6 +21,10 @@ This repository defines a separate test executable in `Test.lean`. Run it with:
 lake exe test
 ```
 
+```powershell
+lake exe leanforth test/tester.fr test/core.fr
+```
+
 The test file uses `#guard` assertions to validate the evaluator. If all checks pass, the executable prints `All tests passed!`.
 
 ## Resources

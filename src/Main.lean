@@ -1,15 +1,5 @@
 import LeanForth
 
-def printResult (path : System.FilePath) : IO Unit := do
-  let contents ← IO.FS.readFile path
-  match LeanForth.runRuntime contents with
-  | .ok state =>
-      if !state.output.isEmpty then
-        IO.print state.output
-      if !state.stack.isEmpty then
-        IO.println s!"stack: {repr state.stack}"
-  | .error err => IO.eprintln s!"error: {LeanForth.formatRuntimeError err}"
-
 def printSessionResult (session : LeanForth.RuntimeSession) : IO LeanForth.RuntimeSession := do
   if !session.state.output.isEmpty then
     IO.print session.state.output
@@ -41,7 +31,17 @@ def runRepl : IO Unit := do
   IO.println "LeanForth REPL. Type #quit to exit."
   replLoop LeanForth.initialRuntimeSession
 
+partial def runFiles (session : LeanForth.RuntimeSession) : List String → IO Unit
+  | [] => pure ()
+  | filePath :: rest => do
+      let contents ← IO.FS.readFile filePath
+      match LeanForth.runRuntimeFrom session contents with
+      | .ok nextSession =>
+          let nextSession ← printSessionResult nextSession
+          runFiles nextSession rest
+      | .error err => IO.eprintln s!"error in {filePath}: {LeanForth.formatRuntimeError err}"
+
 def main (args : List String) : IO Unit := do
   match args with
-  | filePath :: _ => printResult filePath
   | [] => runRepl
+  | _ => runFiles LeanForth.initialRuntimeSession args
