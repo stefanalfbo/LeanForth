@@ -13,6 +13,7 @@ structure RuntimeState where
   output : String
   cells : List (Int × Int) := []
   here : Int := 0
+  base : Nat := 10
   deriving Repr, DecidableEq, BEq
 
 /-- A token paired with its source line number. -/
@@ -232,6 +233,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | value :: rest =>
           Except.ok { state with stack := rest, cells := writeCell state.cells state.here value, here := state.here + 1 }
       | _ => Except.error (.stackUnderflow "," line))
+  , ("HEX", fun _ state => Except.ok { state with base := 16 })
+  , ("DECIMAL", fun _ state => Except.ok { state with base := 10 })
   ]
 
 /-- The initial dictionary of built-in words. -/
@@ -263,13 +266,14 @@ structure DefinitionCompileState where
   compileStack : RuntimeStack
   compileCells : List (Int × Int)
   compileHere : Int
+  base : Nat
   immediateMode : Bool
   definingWordImmediate : Bool
   deriving Repr, DecidableEq, BEq
 
 /-- The initial compile-time state for a colon definition. -/
-def initialDefinitionCompileState : DefinitionCompileState :=
-  { opsRev := [], compileStack := [], compileCells := [], compileHere := 0, immediateMode := false, definingWordImmediate := false }
+def initialDefinitionCompileState (base : Nat := 10) : DefinitionCompileState :=
+  { opsRev := [], compileStack := [], compileCells := [], compileHere := 0, base := base, immediateMode := false, definingWordImmediate := false }
 
 /-- Read a quoted string up to the next `"`, tracking line numbers. -/
 partial def takeQuotedChars (line : Nat) : List Char → Except RuntimeError (List Char × List Char × Nat)
@@ -357,10 +361,34 @@ partial def tokenizeChars
 def tokenizeRuntime (source : String) : Except RuntimeError (List SourceToken) :=
   tokenizeChars source.toList 1 [] 1 []
 
+/-- Parse an integer in the given base (digits 0–9, a–f/A–F for base 16). -/
+def parseIntInBase (base : Nat) (s : String) : Option Int :=
+  let chars := s.toList
+  match chars with
+  | [] => none
+  | _ =>
+    let (neg, digits) := match chars with
+      | '-' :: rest => (true, rest)
+      | _ => (false, chars)
+    if digits.isEmpty then none
+    else
+      let rec go (acc : Nat) : List Char → Option Nat
+        | [] => some acc
+        | ch :: rest =>
+            let d : Option Nat :=
+              if ch >= '0' && ch <= '9' then some (ch.toNat - '0'.toNat)
+              else if base > 10 && ch >= 'a' && ch <= 'f' then some (ch.toNat - 'a'.toNat + 10)
+              else if base > 10 && ch >= 'A' && ch <= 'F' then some (ch.toNat - 'A'.toNat + 10)
+              else none
+            match d with
+            | none => none
+            | some d => if d < base then go (acc * base + d) rest else none
+      (go 0 digits).map fun n => if neg then -(Int.ofNat n) else Int.ofNat n
+
 /-- Compile one source token into a runtime operation. -/
-def compileToken (token : SourceToken) : Op :=
+def compileToken (base : Nat) (token : SourceToken) : Op :=
   let trimmed := token.text.trimAscii.toString
-  match trimmed.toInt? with
+  match parseIntInBase base trimmed with
   | some n => .push n
   | none => .call trimmed token.line
 
@@ -404,12 +432,12 @@ partial def executeImmediateToken
     (state : DefinitionCompileState)
     (token : SourceToken)
     : Except RuntimeError DefinitionCompileState := do
-  let runtimeState ← executeOp dict { stack := state.compileStack, output := "", cells := state.compileCells, here := state.compileHere } (compileToken token)
-  Except.ok { state with compileStack := runtimeState.stack, compileCells := runtimeState.cells, compileHere := runtimeState.here }
+  let runtimeState ← executeOp dict { stack := state.compileStack, output := "", cells := state.compileCells, here := state.compileHere, base := state.base } (compileToken state.base token)
+  Except.ok { state with compileStack := runtimeState.stack, compileCells := runtimeState.cells, compileHere := runtimeState.here, base := runtimeState.base }
 
 /-- Compile a token as a call, even if the word is immediate. -/
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
-  { state with opsRev := compileToken token :: state.opsRev, compileHere := state.compileHere + 1 }
+  { state with opsRev := compileToken state.base token :: state.opsRev, compileHere := state.compileHere + 1 }
 
 /-- Compile a literal execution token for the next parsed word. -/
 def compileExecutionToken (dict : RuntimeDictionary) (token : SourceToken) (state : DefinitionCompileState)
@@ -481,6 +509,10 @@ partial def compileDefinitionTokens
       | false, ".\"", textTok :: remaining =>
           compileDefinitionTokens dict word startLine
             { state with opsRev := .emitText textTok.text :: state.opsRev, compileHere := state.compileHere + 1 } remaining
+      | false, "HEX", _ =>
+          compileDefinitionTokens dict word startLine { state with base := 16 } rest
+      | false, "DECIMAL", _ =>
+          compileDefinitionTokens dict word startLine { state with base := 10 } rest
       | false, _, _ =>
           match lookupEntry dict token.text with
           | some entry =>
@@ -495,51 +527,55 @@ partial def compileDefinitionTokens
 /-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
 partial def interpretTokens
     (dict : RuntimeDictionary)
+    (base : Nat)
     (opsRev : List Op)
-    : List SourceToken → Except RuntimeError (RuntimeDictionary × List Op)
-  | [] => Except.ok (dict, opsRev.reverse)
+    : List SourceToken → Except RuntimeError (RuntimeDictionary × Nat × List Op)
+  | [] => Except.ok (dict, base, opsRev.reverse)
   | token :: rest =>
-      if token.text == "(" then
-        do
+      if token.text == "(" then do
         let remaining ← dropCommentTokens token.line rest
-        interpretTokens dict opsRev remaining
+        interpretTokens dict base opsRev remaining
+      else if token.text == "HEX" then
+        interpretTokens dict 16 (.call "HEX" token.line :: opsRev) rest
+      else if token.text == "DECIMAL" then
+        interpretTokens dict 10 (.call "DECIMAL" token.line :: opsRev) rest
       else if token.text == "'" then
         match rest with
         | [] => Except.error (.stackUnderflow "'" token.line)
         | nextTok :: remaining => do
             let xt ← executionTokenOf dict nextTok
-            interpretTokens dict (.push xt :: opsRev) remaining
+            interpretTokens dict base (.push xt :: opsRev) remaining
       else if token.text == ":" then
         match rest with
         | [] => Except.error (.invalidDefinition token.line)
         | nameTok :: remaining => do
             let (compileState, afterDef) ←
-              compileDefinitionTokens dict nameTok.text nameTok.line initialDefinitionCompileState remaining
+              compileDefinitionTokens dict nameTok.text nameTok.line (initialDefinitionCompileState base) remaining
             let nextDict := defineWord dict nameTok.text (.compiled compileState.opsRev.reverse) compileState.definingWordImmediate
-            interpretTokens nextDict opsRev afterDef
+            interpretTokens nextDict compileState.base opsRev afterDef
       else if token.text == ".\"" then
         match rest with
         | [] => Except.error (.unterminatedString token.line)
         | textTok :: remaining =>
-            interpretTokens dict (.emitText textTok.text :: opsRev) remaining
+            interpretTokens dict base (.emitText textTok.text :: opsRev) remaining
       else
-        interpretTokens dict (compileToken token :: opsRev) rest
+        interpretTokens dict base (compileToken base token :: opsRev) rest
 
 /-- Evaluate a source program token by token from left to right. -/
-def evalRuntimeTokens (dict : RuntimeDictionary) (tokens : List SourceToken) : Except RuntimeError RuntimeState := do
-  let (compiledDict, ops) ← interpretTokens dict [] tokens
+def evalRuntimeTokens (dict : RuntimeDictionary) (base : Nat) (tokens : List SourceToken) : Except RuntimeError RuntimeState := do
+  let (compiledDict, _, ops) ← interpretTokens dict base [] tokens
   executeOps compiledDict initialRuntimeState ops
 
 /-- Evaluate source tokens against an existing dictionary and runtime state. -/
 def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken) : Except RuntimeError RuntimeSession := do
-  let (compiledDict, ops) ← interpretTokens session.dict [] tokens
+  let (compiledDict, nextBase, ops) ← interpretTokens session.dict session.state.base [] tokens
   let nextState ← executeOps compiledDict session.state ops
-  Except.ok { dict := compiledDict, state := nextState }
+  Except.ok { dict := compiledDict, state := { nextState with base := nextBase } }
 
 /-- Parse and evaluate source text in one step. -/
 def runRuntime (source : String) : Except RuntimeError RuntimeState := do
   let tokens ← tokenizeRuntime source
-  evalRuntimeTokens initialDictionary tokens
+  evalRuntimeTokens initialDictionary 10 tokens
 
 /-- Parse and evaluate source text against an existing interpreter session. -/
 def runRuntimeFrom (session : RuntimeSession) (source : String) : Except RuntimeError RuntimeSession := do
