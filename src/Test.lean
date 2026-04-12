@@ -110,6 +110,7 @@ def fileLines (contents : String) : List String :=
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
+#guard runRuntime "LIT" == .error (.invalidPrimitiveUse "LIT" 1)
 #guard runRuntime "+" == .error (.stackUnderflow "+" 1)
 #guard runRuntime "=" == .error (.stackUnderflow "=" 1)
 #guard runRuntime "1+" == .error (.stackUnderflow "1+" 1)

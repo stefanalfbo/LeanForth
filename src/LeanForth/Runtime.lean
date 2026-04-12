@@ -24,6 +24,7 @@ structure SourceToken where
 inductive RuntimeError where
   | stackUnderflow (word : String) (line : Nat)
   | unknownWord (word : String) (line : Nat)
+  | invalidPrimitiveUse (word : String) (line : Nat)
   | invalidDefinition (line : Nat)
   | missingSemicolon (word : String) (line : Nat)
   | unterminatedString (line : Nat)
@@ -76,6 +77,7 @@ instance : BEq (Except RuntimeError (List SourceToken)) where
 def formatRuntimeError : RuntimeError → String
   | .stackUnderflow word line => s!"line {line}: stack underflow in `{word}`"
   | .unknownWord word line => s!"line {line}: unknown word `{word}`"
+  | .invalidPrimitiveUse word line => s!"line {line}: `{word}` is not valid in interpretation state"
   | .invalidDefinition line => s!"line {line}: invalid definition"
   | .missingSemicolon word line => s!"line {line}: missing `;` for `{word}`"
   | .unterminatedString line => s!"line {line}: unterminated string"
@@ -174,7 +176,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
           Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
       | _ => Except.error (.stackUnderflow "EMIT" line))
   , ("HERE", fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
-  , ("LIT", fun _ state => Except.ok state)
+  , ("LIT", fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
   , ("@", fun line state =>
       match state.stack with
       | addr :: rest =>
