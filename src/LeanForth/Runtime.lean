@@ -235,6 +235,17 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | _ => Except.error (.stackUnderflow "," line))
   , ("HEX", fun _ state => Except.ok { state with base := 16 })
   , ("DECIMAL", fun _ state => Except.ok { state with base := 10 })
+  , ("TRUE", fun _ state => Except.ok { state with stack := (-1) :: state.stack })
+  , ("FALSE", fun _ state => Except.ok { state with stack := 0 :: state.stack })
+  , ("CELLS", fun _ state => Except.ok state)  -- 1 cell = 1 unit in this implementation
+  , ("CELL+", fun line state =>
+      match state.stack with
+      | n :: rest => Except.ok { state with stack := (n + 1) :: rest }
+      | _ => Except.error (.stackUnderflow "CELL+" line))
+  , ("ALLOT", fun line state =>
+      match state.stack with
+      | n :: rest => Except.ok { state with stack := rest, here := state.here + n }
+      | _ => Except.error (.stackUnderflow "ALLOT" line))
   ]
 
 /-- The initial dictionary of built-in words. -/
@@ -524,53 +535,80 @@ partial def compileDefinitionTokens
           | none =>
               compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
 
+/-- Interpretation-phase state threaded through interpretTokens. -/
+structure InterpState where
+  dict : RuntimeDictionary
+  base : Nat
+  here : Int
+  cells : List (Int × Int)
+
 /-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
 partial def interpretTokens
-    (dict : RuntimeDictionary)
-    (base : Nat)
+    (istate : InterpState)
     (opsRev : List Op)
-    : List SourceToken → Except RuntimeError (RuntimeDictionary × Nat × List Op)
-  | [] => Except.ok (dict, base, opsRev.reverse)
+    : List SourceToken → Except RuntimeError (InterpState × List Op)
+  | [] => Except.ok (istate, opsRev.reverse)
   | token :: rest =>
       if token.text == "(" then do
         let remaining ← dropCommentTokens token.line rest
-        interpretTokens dict base opsRev remaining
+        interpretTokens istate opsRev remaining
       else if token.text == "HEX" then
-        interpretTokens dict 16 (.call "HEX" token.line :: opsRev) rest
+        interpretTokens { istate with base := 16 } (.call "HEX" token.line :: opsRev) rest
       else if token.text == "DECIMAL" then
-        interpretTokens dict 10 (.call "DECIMAL" token.line :: opsRev) rest
+        interpretTokens { istate with base := 10 } (.call "DECIMAL" token.line :: opsRev) rest
+      else if token.text == "VARIABLE" then
+        match rest with
+        | [] => Except.error (.invalidDefinition token.line)
+        | nameTok :: remaining =>
+            let addr := istate.here
+            let varWord := WordDef.compiled [.push addr]
+            let nextDict := defineWord istate.dict nameTok.text varWord
+            let nextCells := writeCell istate.cells addr 0
+            interpretTokens { istate with dict := nextDict, here := addr + 1, cells := nextCells } opsRev remaining
+      else if token.text == "CREATE" then
+        match rest with
+        | [] => Except.error (.invalidDefinition token.line)
+        | nameTok :: remaining =>
+            let addr := istate.here
+            let createWord := WordDef.compiled [.push addr]
+            let nextDict := defineWord istate.dict nameTok.text createWord
+            interpretTokens { istate with dict := nextDict } opsRev remaining
       else if token.text == "'" then
         match rest with
         | [] => Except.error (.stackUnderflow "'" token.line)
         | nextTok :: remaining => do
-            let xt ← executionTokenOf dict nextTok
-            interpretTokens dict base (.push xt :: opsRev) remaining
+            let xt ← executionTokenOf istate.dict nextTok
+            interpretTokens istate (.push xt :: opsRev) remaining
       else if token.text == ":" then
         match rest with
         | [] => Except.error (.invalidDefinition token.line)
         | nameTok :: remaining => do
             let (compileState, afterDef) ←
-              compileDefinitionTokens dict nameTok.text nameTok.line (initialDefinitionCompileState base) remaining
-            let nextDict := defineWord dict nameTok.text (.compiled compileState.opsRev.reverse) compileState.definingWordImmediate
-            interpretTokens nextDict compileState.base opsRev afterDef
+              compileDefinitionTokens istate.dict nameTok.text nameTok.line (initialDefinitionCompileState istate.base) remaining
+            let nextDict := defineWord istate.dict nameTok.text (.compiled compileState.opsRev.reverse) compileState.definingWordImmediate
+            interpretTokens { istate with dict := nextDict, base := compileState.base } opsRev afterDef
       else if token.text == ".\"" then
         match rest with
         | [] => Except.error (.unterminatedString token.line)
         | textTok :: remaining =>
-            interpretTokens dict base (.emitText textTok.text :: opsRev) remaining
+            interpretTokens istate (.emitText textTok.text :: opsRev) remaining
       else
-        interpretTokens dict base (compileToken base token :: opsRev) rest
+        interpretTokens istate (compileToken istate.base token :: opsRev) rest
 
 /-- Evaluate a source program token by token from left to right. -/
 def evalRuntimeTokens (dict : RuntimeDictionary) (base : Nat) (tokens : List SourceToken) : Except RuntimeError RuntimeState := do
-  let (compiledDict, _, ops) ← interpretTokens dict base [] tokens
-  executeOps compiledDict initialRuntimeState ops
+  let istate : InterpState := { dict, base, here := 0, cells := [] }
+  let (nextIstate, ops) ← interpretTokens istate [] tokens
+  let initState : RuntimeState := { stack := [], output := "", here := nextIstate.here, cells := nextIstate.cells }
+  executeOps nextIstate.dict initState ops
 
 /-- Evaluate source tokens against an existing dictionary and runtime state. -/
 def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken) : Except RuntimeError RuntimeSession := do
-  let (compiledDict, nextBase, ops) ← interpretTokens session.dict session.state.base [] tokens
-  let nextState ← executeOps compiledDict session.state ops
-  Except.ok { dict := compiledDict, state := { nextState with base := nextBase } }
+  let istate : InterpState := { dict := session.dict, base := session.state.base, here := session.state.here, cells := session.state.cells }
+  let (nextIstate, ops) ← interpretTokens istate [] tokens
+  let initState : RuntimeState := { session.state with here := nextIstate.here, cells := nextIstate.cells }
+  let nextState ← executeOps nextIstate.dict initState ops
+  Except.ok { dict := nextIstate.dict, state := { nextState with base := nextIstate.base } }
 
 /-- Parse and evaluate source text in one step. -/
 def runRuntime (source : String) : Except RuntimeError RuntimeState := do
