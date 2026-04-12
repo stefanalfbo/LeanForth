@@ -11,6 +11,7 @@ abbrev RuntimeStack := List Int
 structure RuntimeState where
   stack : RuntimeStack
   output : String
+  cells : List (Int × Int) := []
   here : Int := 0
   deriving Repr, DecidableEq, BEq
 
@@ -113,6 +114,23 @@ def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
 def appendOutput (state : RuntimeState) (text : String) : RuntimeState :=
   { state with output := state.output ++ text }
 
+/-- Lookup a stored cell value by address. -/
+def readCell (cells : List (Int × Int)) (addr : Int) : Option Int :=
+  match cells with
+  | [] => none
+  | (cellAddr, value) :: rest =>
+      if cellAddr == addr then some value else readCell rest addr
+
+/-- Insert or overwrite a stored cell value by address. -/
+def writeCell (cells : List (Int × Int)) (addr : Int) (value : Int) : List (Int × Int) :=
+  match cells with
+  | [] => [(addr, value)]
+  | (cellAddr, current) :: rest =>
+      if cellAddr == addr then
+        (addr, value) :: rest
+      else
+        (cellAddr, current) :: writeCell rest addr value
+
 /--
 A dedicated address designator for the synthetic HERE cell.
 This is fixed for identity comparisons and does not vary with the current `here` value.
@@ -184,6 +202,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | addr :: rest =>
           if addr == hereAddress then
             Except.ok { state with stack := state.here :: rest }
+          else if let some value := readCell state.cells addr then
+            Except.ok { state with stack := value :: rest }
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "@" line))
@@ -192,6 +212,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | addr :: value :: rest =>
           if addr == hereAddress then
             Except.ok { state with here := value, stack := rest }
+          else if (readCell state.cells addr).isSome then
+            Except.ok { state with cells := writeCell state.cells addr value, stack := rest }
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "!" line))
@@ -200,12 +222,15 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | addr :: delta :: rest =>
           if addr == hereAddress then
             Except.ok { state with here := state.here + delta, stack := rest }
+          else if let some value := readCell state.cells addr then
+            Except.ok { state with cells := writeCell state.cells addr (value + delta), stack := rest }
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "+!" line))
   , (",", fun line state =>
       match state.stack with
-      | _value :: rest => Except.ok { state with stack := rest, here := state.here + 1 }
+      | value :: rest =>
+          Except.ok { state with stack := rest, cells := writeCell state.cells state.here value, here := state.here + 1 }
       | _ => Except.error (.stackUnderflow "," line))
   ]
 
@@ -236,6 +261,7 @@ def initialRuntimeSession : RuntimeSession :=
 structure DefinitionCompileState where
   opsRev : List Op
   compileStack : RuntimeStack
+  compileCells : List (Int × Int)
   compileHere : Int
   immediateMode : Bool
   definingWordImmediate : Bool
@@ -243,7 +269,7 @@ structure DefinitionCompileState where
 
 /-- The initial compile-time state for a colon definition. -/
 def initialDefinitionCompileState : DefinitionCompileState :=
-  { opsRev := [], compileStack := [], compileHere := 0, immediateMode := false, definingWordImmediate := false }
+  { opsRev := [], compileStack := [], compileCells := [], compileHere := 0, immediateMode := false, definingWordImmediate := false }
 
 /-- Read a quoted string up to the next `"`, tracking line numbers. -/
 partial def takeQuotedChars (line : Nat) : List Char → Except RuntimeError (List Char × List Char × Nat)
@@ -378,8 +404,8 @@ partial def executeImmediateToken
     (state : DefinitionCompileState)
     (token : SourceToken)
     : Except RuntimeError DefinitionCompileState := do
-  let runtimeState ← executeOp dict { stack := state.compileStack, output := "", here := state.compileHere } (compileToken token)
-  Except.ok { state with compileStack := runtimeState.stack, compileHere := runtimeState.here }
+  let runtimeState ← executeOp dict { stack := state.compileStack, output := "", cells := state.compileCells, here := state.compileHere } (compileToken token)
+  Except.ok { state with compileStack := runtimeState.stack, compileCells := runtimeState.cells, compileHere := runtimeState.here }
 
 /-- Compile a token as a call, even if the word is immediate. -/
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=

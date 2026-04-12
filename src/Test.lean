@@ -69,7 +69,8 @@ def fileLines (contents : String) : List String :=
 #guard runRuntime "12 HERE ! HERE @" == .ok { stack := [12], output := "", here := 12 }
 #guard runRuntime "12 HERE ! 12 @" == .error (.invalidAddress 12 1)
 #guard runRuntime "3 HERE +! HERE @" == .ok { stack := [3], output := "", here := 3 }
-#guard runRuntime "99 ," == .ok { stack := [], output := "", here := 1 }
+#guard runRuntime "99 ," == .ok { stack := [], output := "", cells := [(0, 99)], here := 1 }
+#guard runRuntime "99 , 0 @" == .ok { stack := [99], output := "", cells := [(0, 99)], here := 1 }
 #guard runRuntime "' dup ' DUP =" == .ok { stack := [1], output := "" }
 #guard runRuntime "' dup ' swap =" == .ok { stack := [0], output := "" }
 #guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
