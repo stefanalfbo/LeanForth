@@ -102,6 +102,7 @@ open LeanForth
 #guard runRuntime ": show-square dup * . ; 5 show-square" == .ok { stack := [], output := "25" }
 #guard runRuntime ": greet .\" hello\" ; greet" == .ok { stack := [], output := "hello" }
 #guard runRuntime ": sq dup * \\ square it\n ; 6 sq" == .ok { stack := [36], output := "" }
+#guard runRuntime ": sq ( n -- n^2 ) dup * ; 6 sq" == .ok { stack := [36], output := "" }
 #guard runRuntime ": x [ 3 4 + ] LITERAL ; x" == .ok { stack := [7], output := "" }
 #guard runRuntime ": semicolon [ CHAR ; ] LITERAL ; semicolon" == .ok { stack := [59], output := "" }
 #guard runRuntime ": ':' [ CHAR : ] LITERAL ; ':'" == .ok { stack := [58], output := "" }

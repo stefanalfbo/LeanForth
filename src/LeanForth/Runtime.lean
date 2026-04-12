@@ -416,6 +416,9 @@ partial def compileDefinitionTokens
           compileDefinitionTokens dict word startLine nextState rest
       | false, ";", _ =>
           Except.ok (state, rest)
+      | false, "(", _ => do
+          let remaining ← dropCommentTokens token.line rest
+          compileDefinitionTokens dict word startLine state remaining
       | false, "IMMEDIATE", _ =>
           compileDefinitionTokens dict word startLine { state with definingWordImmediate := true } rest
       | false, "[COMPILE]", [] =>
