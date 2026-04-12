@@ -41,6 +41,7 @@ def fileLines (contents : String) : List String :=
 #guard lookupWord initialDictionary "KEY" |>.isSome
 #guard lookupWord initialDictionary "EMIT" |>.isSome
 #guard lookupWord initialDictionary "HERE" |>.isSome
+#guard lookupWord initialDictionary "LIT" |>.isSome
 #guard lookupWord initialDictionary "@" |>.isSome
 #guard lookupWord initialDictionary "!" |>.isSome
 #guard lookupWord initialDictionary "+!" |>.isSome

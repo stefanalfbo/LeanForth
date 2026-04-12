@@ -168,6 +168,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
           Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
       | _ => Except.error (.stackUnderflow "EMIT" line))
   , ("HERE", fun _ state => Except.ok { state with stack := state.here :: state.stack })
+  , ("LIT", fun _ state => Except.ok state)
   , ("@", fun line state =>
       match state.stack with
       | addr :: rest =>
