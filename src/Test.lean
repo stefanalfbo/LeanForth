@@ -1,7 +1,9 @@
-import LeanForth.Cli
 import LeanForth.Runtime
 
 open LeanForth
+
+def fileLines (contents : String) : List String :=
+  contents.splitOn "\n" |>.map fun line => line.trimAsciiEnd.toString
 
 -- core arithmetic works through the real runtime entrypoints
 #guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
