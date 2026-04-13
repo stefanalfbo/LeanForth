@@ -555,6 +555,13 @@ partial def compileDefinitionTokens
           Except.error (.unknownWord "[COMPILE]" token.line)
       | false, "[COMPILE]", nextTok :: remaining =>
           compileDefinitionTokens dict word startLine (compileLiteralToken nextTok state) remaining
+      | false, "[CHAR]", [] =>
+          Except.error (.missingCharArgument token.line)
+      | false, "[CHAR]", charTok :: remaining =>
+          let charCode := Int.ofNat <| (charTok.text.toList.head?.getD default).toNat
+          let nextState :=
+            { state with opsRev := .push charCode :: state.opsRev, compileHere := state.compileHere + 1 }
+          compileDefinitionTokens dict word startLine nextState remaining
       | false, "'", [] =>
           Except.error (.stackUnderflow "'" token.line)
       | false, "'", nextTok :: remaining => do
@@ -644,6 +651,12 @@ partial def interpretTokens
         | nextTok :: remaining => do
             let xt ← executionTokenOf istate.dict nextTok
             interpretTokens istate (.push xt :: opsRev) remaining
+      else if token.text == "[CHAR]" then
+        match rest with
+        | [] => Except.error (.missingCharArgument token.line)
+        | charTok :: remaining =>
+            let charCode := Int.ofNat <| (charTok.text.toList.head?.getD default).toNat
+            interpretTokens istate (.push charCode :: opsRev) remaining
       else if token.text == ":" then
         match rest with
         | [] => Except.error (.invalidDefinition token.line)

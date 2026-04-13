@@ -93,6 +93,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "99 , 0 @" == .ok { stack := [99], output := "", cells := [(0, 99)], here := 1 }
 #guard runRuntime "' dup ' DUP =" == .ok { stack := [1], output := "" }
 #guard runRuntime "' dup ' swap =" == .ok { stack := [0], output := "" }
+#guard runRuntime "[CHAR] A" == .ok { stack := [65], output := "" }
 #guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
   | .ok session => (lookupWord session.dict "sq").isSome && withoutLatest session.state == initialRuntimeState
   | .error _ => false
@@ -125,6 +126,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard expectState (runRuntime ": sq dup * \\ square it\n ; 6 sq") { stack := [36], output := "" }
 #guard expectState (runRuntime ": sq ( n -- n^2 ) dup * ; 6 sq") { stack := [36], output := "" }
 #guard expectState (runRuntime ": x [ 3 4 + ] LITERAL ; x") { stack := [7], output := "" }
+#guard expectState (runRuntime ": x [CHAR] A ; x") { stack := [65], output := "" }
 #guard expectState (runRuntime ": semicolon [ CHAR ; ] LITERAL ; semicolon") { stack := [59], output := "" }
 #guard expectState (runRuntime ": ':' [ CHAR : ] LITERAL ; ':'") { stack := [58], output := "" }
 #guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x") { stack := [5], output := "" }
@@ -153,6 +155,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "5 @" == .error (.invalidAddress 5 1)
 #guard runRuntime "5 12 !" == .error (.invalidAddress 12 1)
 #guard runRuntime "5 12 +!" == .error (.invalidAddress 12 1)
+#guard runRuntime "[CHAR]" == .error (.missingCharArgument 1)
 #guard runRuntime ": x [ CHAR" == .error (.missingCharArgument 1)
 #guard runRuntime "'" == .error (.stackUnderflow "'" 1)
 #guard runRuntime "1\n]" == .error (.unknownWord "]" 2)
