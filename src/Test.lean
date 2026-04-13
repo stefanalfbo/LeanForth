@@ -47,6 +47,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard lookupWord initialDictionary "DROP" |>.isSome
 #guard lookupWord initialDictionary "CR" |>.isSome
 #guard lookupWord initialDictionary "=" |>.isSome
+#guard lookupWord initialDictionary "INVERT" |>.isSome
 #guard lookupWord initialDictionary "1+" |>.isSome
 #guard lookupWord initialDictionary "1-" |>.isSome
 #guard lookupWord initialDictionary "KEY" |>.isSome
@@ -72,6 +73,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "7 DUP *" == .ok { stack := [49], output := "" }
 #guard runRuntime "3 3 =" == .ok { stack := [1], output := "" }
 #guard runRuntime "3 4 =" == .ok { stack := [0], output := "" }
+#guard runRuntime "0 INVERT" == .ok { stack := [-1], output := "" }
 #guard runRuntime "41 1+" == .ok { stack := [42], output := "" }
 #guard runRuntime "41 1-" == .ok { stack := [40], output := "" }
 #guard runRuntime "KEY" == .ok { stack := [0], output := "", here := 0 }
@@ -137,6 +139,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "+" == .error (.stackUnderflow "+" 1)
 #guard runRuntime "/" == .error (.stackUnderflow "/" 1)
 #guard runRuntime "=" == .error (.stackUnderflow "=" 1)
+#guard runRuntime "INVERT" == .error (.stackUnderflow "INVERT" 1)
 #guard runRuntime "1+" == .error (.stackUnderflow "1+" 1)
 #guard runRuntime "1-" == .error (.stackUnderflow "1-" 1)
 #guard runRuntime "1 0 /" == .error (.divisionByZero "/" 1)

@@ -192,6 +192,10 @@ def builtinDefs : List (String × BuiltinHandler) :=
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := (if b == a then 1 else 0) :: rest }
       | _ => Except.error (.stackUnderflow "=" line))
+  , builtin "INVERT" (fun line state =>
+      match state.stack with
+      | a :: rest => Except.ok { state with stack := (~~~a) :: rest }
+      | _ => Except.error (.stackUnderflow "INVERT" line))
   , builtin "1+" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := (a + 1) :: rest }
