@@ -55,6 +55,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard lookupWord initialDictionary "HERE" |>.isSome
 #guard lookupWord initialDictionary "LATEST" |>.isSome
 #guard lookupWord initialDictionary "LIT" |>.isSome
+#guard lookupWord initialDictionary "LITSTRING" |>.isSome
 #guard lookupWord initialDictionary "BRANCH" |>.isSome
 #guard lookupWord initialDictionary "0BRANCH" |>.isSome
 #guard lookupWord initialDictionary ">CFA" |>.isSome
@@ -136,6 +137,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
 #guard runRuntime "LIT" == .error (.invalidPrimitiveUse "LIT" 1)
+#guard runRuntime "LITSTRING" == .error (.invalidPrimitiveUse "LITSTRING" 1)
 #guard runRuntime "BRANCH" == .error (.invalidPrimitiveUse "BRANCH" 1)
 #guard runRuntime "0BRANCH" == .error (.invalidPrimitiveUse "0BRANCH" 1)
 #guard runRuntime "+" == .error (.stackUnderflow "+" 1)

@@ -234,6 +234,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
   , builtin "HERE" (fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , builtin "LATEST" (fun _ state => Except.ok { state with stack := latestAddress :: state.stack })
   , builtin "LIT" (fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
+  , builtin "LITSTRING" (fun line _ => Except.error (.invalidPrimitiveUse "LITSTRING" line))
   , builtin "BRANCH" (fun line _ => Except.error (.invalidPrimitiveUse "BRANCH" line))
   , builtin "0BRANCH" (fun line _ => Except.error (.invalidPrimitiveUse "0BRANCH" line))
   , builtin ">CFA" (fun line state =>
