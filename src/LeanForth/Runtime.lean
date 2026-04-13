@@ -13,6 +13,7 @@ structure RuntimeState where
   output : String
   cells : List (Int × Int) := []
   here : Int := 0
+  latest : Int := 0
   base : Nat := 10
   deriving Repr, DecidableEq, BEq
 
@@ -104,9 +105,17 @@ def lookupWord (dict : RuntimeDictionary) (name : String) : Option WordDef :=
 def nextExecutionToken (dict : RuntimeDictionary) : Int :=
   dict.foldl (fun acc (_, entry) => max acc (entry.xt + 1)) 1
 
+/-- The most recent execution token present in the dictionary. -/
+def latestExecutionToken (dict : RuntimeDictionary) : Int :=
+  dict.foldl (fun acc (_, entry) => max acc entry.xt) 0
+
 /-- Add or shadow a dictionary entry. -/
 def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) (immediate := false) : RuntimeDictionary :=
   let xt := nextExecutionToken dict
+  (name, { word := word, immediate := immediate, xt := xt }) :: dict
+
+/-- Add or shadow a dictionary entry with an explicitly chosen execution token. -/
+def defineWordWithXt (dict : RuntimeDictionary) (name : String) (word : WordDef) (xt : Int) (immediate := false) : RuntimeDictionary :=
   (name, { word := word, immediate := immediate, xt := xt }) :: dict
 
 /-- Push a value onto the stack. -/
@@ -140,102 +149,118 @@ This is fixed for identity comparisons and does not vary with the current `here`
 -/
 def hereAddress : Int := -314159265
 
+/-- A dedicated address designator for the synthetic LATEST cell. -/
+def latestAddress : Int := -314159266
+
 /-- Function type for built-in primitive words. -/
 abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeState
 
+/-- Helper to keep built-in table entries monomorphic for Lean's elaborator. -/
+def builtin (name : String) (handler : BuiltinHandler) : String × BuiltinHandler :=
+  (name, handler)
+
 /-- Built-in arithmetic, stack, and output words. -/
 def builtinDefs : List (String × BuiltinHandler) :=
-  [ ("+", fun line state =>
+  [ builtin "+" (fun line state =>
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := (b + a) :: rest }
       | _ => Except.error (.stackUnderflow "+" line))
-  , ("-", fun line state =>
+  , builtin "-" (fun line state =>
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := (b - a) :: rest }
       | _ => Except.error (.stackUnderflow "-" line))
-  , ("*", fun line state =>
+  , builtin "*" (fun line state =>
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := (b * a) :: rest }
       | _ => Except.error (.stackUnderflow "*" line))
-  , ("/MOD", fun line state =>
+  , builtin "/MOD" (fun line state =>
       match state.stack with
       | 0 :: _ :: _ => Except.error (.divisionByZero "/MOD" line)
       | a :: b :: rest => Except.ok { state with stack := (b % a) :: (b / a) :: rest }
       | _ => Except.error (.stackUnderflow "/MOD" line))
-  , ("/", fun line state =>
+  , builtin "/" (fun line state =>
       match state.stack with
       | 0 :: _ :: _ => Except.error (.divisionByZero "/" line)
       | a :: b :: rest => Except.ok { state with stack := (b / a) :: rest }
       | _ => Except.error (.stackUnderflow "/" line))
-  , ("MOD", fun line state =>
+  , builtin "MOD" (fun line state =>
       match state.stack with
       | 0 :: _ :: _ => Except.error (.divisionByZero "MOD" line)
       | a :: b :: rest => Except.ok { state with stack := (b % a) :: rest }
       | _ => Except.error (.stackUnderflow "MOD" line))
-  , ("=", fun line state =>
+  , builtin "=" (fun line state =>
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := (if b == a then 1 else 0) :: rest }
       | _ => Except.error (.stackUnderflow "=" line))
-  , ("1+", fun line state =>
+  , builtin "1+" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := (a + 1) :: rest }
       | _ => Except.error (.stackUnderflow "1+" line))
-  , ("1-", fun line state =>
+  , builtin "1-" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := (a - 1) :: rest }
       | _ => Except.error (.stackUnderflow "1-" line))
-  , ("dup", fun line state =>
+  , builtin "dup" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := a :: a :: rest }
       | _ => Except.error (.stackUnderflow "dup" line))
-  , ("drop", fun line state =>
+  , builtin "drop" (fun line state =>
       match state.stack with
       | _ :: rest => Except.ok { state with stack := rest }
       | _ => Except.error (.stackUnderflow "drop" line))
-  , ("swap", fun line state =>
+  , builtin "swap" (fun line state =>
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := b :: a :: rest }
       | _ => Except.error (.stackUnderflow "swap" line))
-  , ("over", fun line state =>
+  , builtin "over" (fun line state =>
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := b :: a :: b :: rest }
       | _ => Except.error (.stackUnderflow "over" line))
-  , (".", fun line state =>
+  , builtin "." (fun line state =>
       match state.stack with
       | a :: rest => Except.ok <| appendOutput { state with stack := rest } (toString a)
       | _ => Except.error (.stackUnderflow "." line))
-  , ("cr", fun _ state => Except.ok <| appendOutput state "\n")
-  , ("KEY", fun _ state => Except.ok { state with stack := 0 :: state.stack })
-  , ("EMIT", fun line state =>
+  , builtin "cr" (fun _ state => Except.ok <| appendOutput state "\n")
+  , builtin "KEY" (fun _ state => Except.ok { state with stack := 0 :: state.stack })
+  , builtin "EMIT" (fun line state =>
       match state.stack with
       | ch :: rest =>
           Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
       | _ => Except.error (.stackUnderflow "EMIT" line))
-  , ("HERE", fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
-  , ("LIT", fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
-  , ("BRANCH", fun line _ => Except.error (.invalidPrimitiveUse "BRANCH" line))
-  , ("0BRANCH", fun line _ => Except.error (.invalidPrimitiveUse "0BRANCH" line))
-  , ("@", fun line state =>
+  , builtin "HERE" (fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
+  , builtin "LATEST" (fun _ state => Except.ok { state with stack := latestAddress :: state.stack })
+  , builtin "LIT" (fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
+  , builtin "BRANCH" (fun line _ => Except.error (.invalidPrimitiveUse "BRANCH" line))
+  , builtin "0BRANCH" (fun line _ => Except.error (.invalidPrimitiveUse "0BRANCH" line))
+  , builtin ">CFA" (fun line state =>
+      match state.stack with
+      | xt :: rest => Except.ok { state with stack := xt :: rest }
+      | _ => Except.error (.stackUnderflow ">CFA" line))
+  , builtin "@" (fun line state =>
       match state.stack with
       | addr :: rest =>
           if addr == hereAddress then
             Except.ok { state with stack := state.here :: rest }
+          else if addr == latestAddress then
+            Except.ok { state with stack := state.latest :: rest }
           else if let some value := readCell state.cells addr then
             Except.ok { state with stack := value :: rest }
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "@" line))
-  , ("!", fun line state =>
+  , builtin "!" (fun line state =>
       match state.stack with
       | addr :: value :: rest =>
           if addr == hereAddress then
             Except.ok { state with here := value, stack := rest }
+          else if addr == latestAddress then
+            Except.ok { state with latest := value, stack := rest }
           else if (readCell state.cells addr).isSome then
             Except.ok { state with cells := writeCell state.cells addr value, stack := rest }
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "!" line))
-  , ("+!", fun line state =>
+  , builtin "+!" (fun line state =>
       match state.stack with
       | addr :: delta :: rest =>
           if addr == hereAddress then
@@ -245,21 +270,21 @@ def builtinDefs : List (String × BuiltinHandler) :=
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "+!" line))
-  , (",", fun line state =>
+  , builtin "," (fun line state =>
       match state.stack with
       | value :: rest =>
           Except.ok { state with stack := rest, cells := writeCell state.cells state.here value, here := state.here + 1 }
       | _ => Except.error (.stackUnderflow "," line))
-  , ("HEX", fun _ state => Except.ok { state with base := 16 })
-  , ("DECIMAL", fun _ state => Except.ok { state with base := 10 })
-  , ("TRUE", fun _ state => Except.ok { state with stack := (-1) :: state.stack })
-  , ("FALSE", fun _ state => Except.ok { state with stack := 0 :: state.stack })
-  , ("CELLS", fun _ state => Except.ok state)  -- 1 cell = 1 unit in this implementation
-  , ("CELL+", fun line state =>
+  , builtin "HEX" (fun _ state => Except.ok { state with base := 16 })
+  , builtin "DECIMAL" (fun _ state => Except.ok { state with base := 10 })
+  , builtin "TRUE" (fun _ state => Except.ok { state with stack := (-1) :: state.stack })
+  , builtin "FALSE" (fun _ state => Except.ok { state with stack := 0 :: state.stack })
+  , builtin "CELLS" (fun _ state => Except.ok state)  -- 1 cell = 1 unit in this implementation
+  , builtin "CELL+" (fun line state =>
       match state.stack with
       | n :: rest => Except.ok { state with stack := (n + 1) :: rest }
       | _ => Except.error (.stackUnderflow "CELL+" line))
-  , ("ALLOT", fun line state =>
+  , builtin "ALLOT" (fun line state =>
       match state.stack with
       | n :: rest => Except.ok { state with stack := rest, here := state.here + n }
       | _ => Except.error (.stackUnderflow "ALLOT" line))
@@ -294,6 +319,7 @@ structure DefinitionCompileState where
   compileStack : RuntimeStack
   compileCells : List (Int × Int)
   compileHere : Int
+  compileLatest : Int
   base : Nat
   immediateMode : Bool
   definingWordImmediate : Bool
@@ -301,7 +327,8 @@ structure DefinitionCompileState where
 
 /-- The initial compile-time state for a colon definition. -/
 def initialDefinitionCompileState (base : Nat := 10) : DefinitionCompileState :=
-  { opsRev := [], compileStack := [], compileCells := [], compileHere := 0, base := base, immediateMode := false, definingWordImmediate := false }
+  { opsRev := [], compileStack := [], compileCells := [], compileHere := 0, compileLatest := 0,
+    base := base, immediateMode := false, definingWordImmediate := false }
 
 /-- Read a quoted string up to the next `"`, tracking line numbers. -/
 partial def takeQuotedChars (line : Nat) : List Char → Except RuntimeError (List Char × List Char × Nat)
@@ -460,8 +487,17 @@ partial def executeImmediateToken
     (state : DefinitionCompileState)
     (token : SourceToken)
     : Except RuntimeError DefinitionCompileState := do
-  let runtimeState ← executeOp dict { stack := state.compileStack, output := "", cells := state.compileCells, here := state.compileHere, base := state.base } (compileToken state.base token)
-  Except.ok { state with compileStack := runtimeState.stack, compileCells := runtimeState.cells, compileHere := runtimeState.here, base := runtimeState.base }
+  let runtimeState ← executeOp dict
+    { stack := state.compileStack, output := "", cells := state.compileCells
+      , here := state.compileHere, latest := state.compileLatest, base := state.base }
+    (compileToken state.base token)
+  Except.ok
+    { state with
+        compileStack := runtimeState.stack
+        compileCells := runtimeState.cells
+        compileHere := runtimeState.here
+        compileLatest := runtimeState.latest
+        base := runtimeState.base }
 
 /-- Compile a token as a call, even if the word is immediate. -/
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
@@ -558,6 +594,7 @@ structure InterpState where
   base : Nat
   here : Int
   cells : List (Int × Int)
+  latest : Int
 
 /-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
 partial def interpretTokens
@@ -581,7 +618,13 @@ partial def interpretTokens
             let varWord := WordDef.compiled [.push addr]
             let nextDict := defineWord istate.dict nameTok.text varWord
             let nextCells := writeCell istate.cells addr 0
-            interpretTokens { istate with dict := nextDict, here := addr + 1, cells := nextCells } opsRev remaining
+            let nextIstate :=
+              { istate with
+                  dict := nextDict
+                  here := addr + 1
+                  cells := nextCells
+                  latest := latestExecutionToken nextDict }
+            interpretTokens nextIstate opsRev remaining
       else if token.text == "CREATE" then
         match rest with
         | [] => Except.error (.invalidDefinition token.line)
@@ -589,7 +632,8 @@ partial def interpretTokens
             let addr := istate.here
             let createWord := WordDef.compiled [.push addr]
             let nextDict := defineWord istate.dict nameTok.text createWord
-            interpretTokens { istate with dict := nextDict } opsRev remaining
+            let nextIstate := { istate with dict := nextDict, latest := latestExecutionToken nextDict }
+            interpretTokens nextIstate opsRev remaining
       else if token.text == "'" then
         match rest with
         | [] => Except.error (.stackUnderflow "'" token.line)
@@ -600,10 +644,12 @@ partial def interpretTokens
         match rest with
         | [] => Except.error (.invalidDefinition token.line)
         | nameTok :: remaining => do
+            let xt := nextExecutionToken istate.dict
             let (compileState, afterDef) ←
-              compileDefinitionTokens istate.dict nameTok.text nameTok.line (initialDefinitionCompileState istate.base) remaining
-            let nextDict := defineWord istate.dict nameTok.text (.compiled compileState.opsRev.reverse) compileState.definingWordImmediate
-            interpretTokens { istate with dict := nextDict, base := compileState.base } opsRev afterDef
+              compileDefinitionTokens istate.dict nameTok.text nameTok.line
+                { (initialDefinitionCompileState istate.base) with compileLatest := xt } remaining
+            let nextDict := defineWordWithXt istate.dict nameTok.text (.compiled compileState.opsRev.reverse) xt compileState.definingWordImmediate
+            interpretTokens { istate with dict := nextDict, base := compileState.base, latest := xt } opsRev afterDef
       else if token.text == ".\"" then
         match rest with
         | [] => Except.error (.unterminatedString token.line)
@@ -614,16 +660,18 @@ partial def interpretTokens
 
 /-- Evaluate a source program token by token from left to right. -/
 def evalRuntimeTokens (dict : RuntimeDictionary) (base : Nat) (tokens : List SourceToken) : Except RuntimeError RuntimeState := do
-  let istate : InterpState := { dict, base, here := 0, cells := [] }
+  let istate : InterpState := { dict, base, here := 0, cells := [], latest := 0 }
   let (nextIstate, ops) ← interpretTokens istate [] tokens
-  let initState : RuntimeState := { stack := [], output := "", here := nextIstate.here, cells := nextIstate.cells }
+  let initState : RuntimeState := { stack := [], output := "", here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
   executeOps nextIstate.dict initState ops
 
 /-- Evaluate source tokens against an existing dictionary and runtime state. -/
 def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken) : Except RuntimeError RuntimeSession := do
-  let istate : InterpState := { dict := session.dict, base := session.state.base, here := session.state.here, cells := session.state.cells }
+  let istate : InterpState :=
+    { dict := session.dict, base := session.state.base, here := session.state.here
+      , cells := session.state.cells, latest := session.state.latest }
   let (nextIstate, ops) ← interpretTokens istate [] tokens
-  let initState : RuntimeState := { session.state with here := nextIstate.here, cells := nextIstate.cells }
+  let initState : RuntimeState := { session.state with here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
   let nextState ← executeOps nextIstate.dict initState ops
   Except.ok { dict := nextIstate.dict, state := { nextState with base := nextIstate.base } }
 

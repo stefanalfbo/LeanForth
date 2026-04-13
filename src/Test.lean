@@ -5,6 +5,14 @@ open LeanForth
 def fileLines (contents : String) : List String :=
   contents.splitOn "\n" |>.map fun line => line.trimAsciiEnd.toString
 
+def withoutLatest (state : RuntimeState) : RuntimeState :=
+  { state with latest := 0 }
+
+def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeState) : Bool :=
+  match result with
+  | .ok state => withoutLatest state == expected
+  | .error _ => false
+
 -- core arithmetic works through the real runtime entrypoints
 #guard runRuntime "3 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "10 3 -" == .ok { stack := [7], output := "" }
@@ -44,9 +52,11 @@ def fileLines (contents : String) : List String :=
 #guard lookupWord initialDictionary "KEY" |>.isSome
 #guard lookupWord initialDictionary "EMIT" |>.isSome
 #guard lookupWord initialDictionary "HERE" |>.isSome
+#guard lookupWord initialDictionary "LATEST" |>.isSome
 #guard lookupWord initialDictionary "LIT" |>.isSome
 #guard lookupWord initialDictionary "BRANCH" |>.isSome
 #guard lookupWord initialDictionary "0BRANCH" |>.isSome
+#guard lookupWord initialDictionary ">CFA" |>.isSome
 #guard lookupWord initialDictionary "@" |>.isSome
 #guard lookupWord initialDictionary "!" |>.isSome
 #guard lookupWord initialDictionary "+!" |>.isSome
@@ -70,6 +80,8 @@ def fileLines (contents : String) : List String :=
 #guard runRuntime "3 ( add later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "HERE @" == .ok { stack := [0], output := "", here := 0 }
+#guard runRuntime "LATEST @" == .ok { stack := [0], output := "", latest := 0 }
+#guard runRuntime "' DUP >CFA ' dup =" == .ok { stack := [1], output := "" }
 #guard runRuntime "0 @" == .error (.invalidAddress 0 1)
 #guard runRuntime "-1 @" == .error (.invalidAddress (-1) 1)
 #guard runRuntime "12 HERE ! HERE @" == .ok { stack := [12], output := "", here := 12 }
@@ -80,7 +92,7 @@ def fileLines (contents : String) : List String :=
 #guard runRuntime "' dup ' DUP =" == .ok { stack := [1], output := "" }
 #guard runRuntime "' dup ' swap =" == .ok { stack := [0], output := "" }
 #guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
-  | .ok session => (lookupWord session.dict "sq").isSome && session.state == initialRuntimeState
+  | .ok session => (lookupWord session.dict "sq").isSome && withoutLatest session.state == initialRuntimeState
   | .error _ => false
 #guard match runRuntimeFrom initialRuntimeSession "2" with
   | .ok session =>
@@ -103,19 +115,19 @@ def fileLines (contents : String) : List String :=
 #guard runRuntime ".\" hello world\" cr" == .ok { stack := [], output := "hello world\n" }
 
 -- user-defined words can be introduced with `: name ... ;`
-#guard runRuntime ": sq dup * ; 5 sq" == .ok { stack := [25], output := "" }
-#guard runRuntime ": sq dup * ; 3 sq 4 sq +" == .ok { stack := [25], output := "" }
-#guard runRuntime ": twice dup + ; 7 twice" == .ok { stack := [14], output := "" }
-#guard runRuntime ": show-square dup * . ; 5 show-square" == .ok { stack := [], output := "25" }
-#guard runRuntime ": greet .\" hello\" ; greet" == .ok { stack := [], output := "hello" }
-#guard runRuntime ": sq dup * \\ square it\n ; 6 sq" == .ok { stack := [36], output := "" }
-#guard runRuntime ": sq ( n -- n^2 ) dup * ; 6 sq" == .ok { stack := [36], output := "" }
-#guard runRuntime ": x [ 3 4 + ] LITERAL ; x" == .ok { stack := [7], output := "" }
-#guard runRuntime ": semicolon [ CHAR ; ] LITERAL ; semicolon" == .ok { stack := [59], output := "" }
-#guard runRuntime ": ':' [ CHAR : ] LITERAL ; ':'" == .ok { stack := [58], output := "" }
-#guard runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x" == .ok { stack := [5], output := "" }
-#guard runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y" == .ok { stack := [5], output := "" }
-#guard runRuntime ": xt-word ' dup ; xt-word ' DUP =" == .ok { stack := [1], output := "" }
+#guard expectState (runRuntime ": sq dup * ; 5 sq") { stack := [25], output := "" }
+#guard expectState (runRuntime ": sq dup * ; 3 sq 4 sq +") { stack := [25], output := "" }
+#guard expectState (runRuntime ": twice dup + ; 7 twice") { stack := [14], output := "" }
+#guard expectState (runRuntime ": show-square dup * . ; 5 show-square") { stack := [], output := "25" }
+#guard expectState (runRuntime ": greet .\" hello\" ; greet") { stack := [], output := "hello" }
+#guard expectState (runRuntime ": sq dup * \\ square it\n ; 6 sq") { stack := [36], output := "" }
+#guard expectState (runRuntime ": sq ( n -- n^2 ) dup * ; 6 sq") { stack := [36], output := "" }
+#guard expectState (runRuntime ": x [ 3 4 + ] LITERAL ; x") { stack := [7], output := "" }
+#guard expectState (runRuntime ": semicolon [ CHAR ; ] LITERAL ; semicolon") { stack := [59], output := "" }
+#guard expectState (runRuntime ": ':' [ CHAR : ] LITERAL ; ':'") { stack := [58], output := "" }
+#guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x") { stack := [5], output := "" }
+#guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y") { stack := [5], output := "" }
+#guard expectState (runRuntime ": xt-word ' dup ; xt-word ' DUP =") { stack := [1], output := "" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
