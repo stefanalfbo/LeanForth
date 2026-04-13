@@ -25,6 +25,7 @@ structure SourceToken where
 /-- Errors reported by the interpreter. -/
 inductive RuntimeError where
   | stackUnderflow (word : String) (line : Nat)
+  | divisionByZero (word : String) (line : Nat)
   | unknownWord (word : String) (line : Nat)
   | invalidPrimitiveUse (word : String) (line : Nat)
   | invalidDefinition (line : Nat)
@@ -78,6 +79,7 @@ instance : BEq (Except RuntimeError (List SourceToken)) where
 /-- Render a runtime error for CLI output. -/
 def formatRuntimeError : RuntimeError → String
   | .stackUnderflow word line => s!"line {line}: stack underflow in `{word}`"
+  | .divisionByZero word line => s!"line {line}: division by zero in `{word}`"
   | .unknownWord word line => s!"line {line}: unknown word `{word}`"
   | .invalidPrimitiveUse word line => s!"line {line}: `{word}` is not valid in interpretation state"
   | .invalidDefinition line => s!"line {line}: invalid definition"
@@ -155,6 +157,21 @@ def builtinDefs : List (String × BuiltinHandler) :=
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := (b * a) :: rest }
       | _ => Except.error (.stackUnderflow "*" line))
+  , ("/MOD", fun line state =>
+      match state.stack with
+      | 0 :: _ :: _ => Except.error (.divisionByZero "/MOD" line)
+      | a :: b :: rest => Except.ok { state with stack := (b % a) :: (b / a) :: rest }
+      | _ => Except.error (.stackUnderflow "/MOD" line))
+  , ("/", fun line state =>
+      match state.stack with
+      | 0 :: _ :: _ => Except.error (.divisionByZero "/" line)
+      | a :: b :: rest => Except.ok { state with stack := (b / a) :: rest }
+      | _ => Except.error (.stackUnderflow "/" line))
+  , ("MOD", fun line state =>
+      match state.stack with
+      | 0 :: _ :: _ => Except.error (.divisionByZero "MOD" line)
+      | a :: b :: rest => Except.ok { state with stack := (b % a) :: rest }
+      | _ => Except.error (.stackUnderflow "MOD" line))
   , ("=", fun line state =>
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := (if b == a then 1 else 0) :: rest }

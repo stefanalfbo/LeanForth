@@ -29,6 +29,9 @@ def fileLines (contents : String) : List String :=
 
 -- built-in words are available through the initial dictionary
 #guard lookupWord initialDictionary "+" |>.isSome
+#guard lookupWord initialDictionary "/" |>.isSome
+#guard lookupWord initialDictionary "/MOD" |>.isSome
+#guard lookupWord initialDictionary "MOD" |>.isSome
 #guard lookupWord initialDictionary "dup" |>.isSome
 #guard lookupWord initialDictionary "." |>.isSome
 #guard lookupWord initialDictionary "cr" |>.isSome
@@ -52,6 +55,9 @@ def fileLines (contents : String) : List String :=
 #guard lookupWord (defineWord initialDictionary "sq" (.compiled [.call "dup" 1, .call "*" 1])) "sq" |>.isSome
 
 -- source programs are parsed and evaluated left-to-right
+#guard runRuntime "20 3 /" == .ok { stack := [6], output := "" }
+#guard runRuntime "20 3 MOD" == .ok { stack := [2], output := "" }
+#guard runRuntime "20 3 /MOD" == .ok { stack := [2, 6], output := "" }
 #guard runRuntime "1 2 SWAP" == .ok { stack := [1, 2], output := "" }
 #guard runRuntime "7 DUP *" == .ok { stack := [49], output := "" }
 #guard runRuntime "3 3 =" == .ok { stack := [1], output := "" }
@@ -117,9 +123,13 @@ def fileLines (contents : String) : List String :=
 #guard runRuntime "BRANCH" == .error (.invalidPrimitiveUse "BRANCH" 1)
 #guard runRuntime "0BRANCH" == .error (.invalidPrimitiveUse "0BRANCH" 1)
 #guard runRuntime "+" == .error (.stackUnderflow "+" 1)
+#guard runRuntime "/" == .error (.stackUnderflow "/" 1)
 #guard runRuntime "=" == .error (.stackUnderflow "=" 1)
 #guard runRuntime "1+" == .error (.stackUnderflow "1+" 1)
 #guard runRuntime "1-" == .error (.stackUnderflow "1-" 1)
+#guard runRuntime "1 0 /" == .error (.divisionByZero "/" 1)
+#guard runRuntime "1 0 MOD" == .error (.divisionByZero "MOD" 1)
+#guard runRuntime "1 0 /MOD" == .error (.divisionByZero "/MOD" 1)
 #guard runRuntime "." == .error (.stackUnderflow "." 1)
 #guard runRuntime ":" == .error (.invalidDefinition 1)
 #guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq" 1)
