@@ -15,7 +15,7 @@ structure RuntimeState where
   here : Int := 0
   latest : Int := 0
   base : Nat := 10
-  deriving Repr, DecidableEq, BEq
+  deriving Repr, DecidableEq, BEq, Inhabited
 
 /-- A token paired with its source line number. -/
 structure SourceToken where
@@ -62,6 +62,12 @@ abbrev RuntimeDictionary := List (String × DictEntry)
 structure RuntimeSession where
   dict : RuntimeDictionary
   state : RuntimeState
+
+/-- Result of executing a compiled operation, including early return from a word body. -/
+structure ExecResult where
+  state : RuntimeState
+  exited : Bool := false
+  deriving Inhabited, Nonempty
 
 instance : BEq (Except RuntimeError RuntimeState) where
   beq left right :=
@@ -160,6 +166,14 @@ def latestAddress : Int := -314159266
 /-- Function type for built-in primitive words. -/
 abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeState
 
+/-- Wrap a normal primitive result so execution continues. -/
+def continueExec (state : RuntimeState) : ExecResult :=
+  { state := state, exited := false }
+
+/-- Return early from the current compiled word. -/
+def exitExec (state : RuntimeState) : ExecResult :=
+  { state := state, exited := true }
+
 /-- Helper to keep built-in table entries monomorphic for Lean's elaborator. -/
 def builtin (name : String) (handler : BuiltinHandler) : String × BuiltinHandler :=
   (name, handler)
@@ -251,6 +265,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
   , builtin "LITSTRING" (fun line _ => Except.error (.invalidPrimitiveUse "LITSTRING" line))
   , builtin "BRANCH" (fun line _ => Except.error (.invalidPrimitiveUse "BRANCH" line))
   , builtin "0BRANCH" (fun line _ => Except.error (.invalidPrimitiveUse "0BRANCH" line))
+  , builtin "EXIT" (fun line _ => Except.error (.invalidPrimitiveUse "EXIT" line))
   , builtin ">CFA" (fun line state =>
       match state.stack with
       | xt :: rest => Except.ok { state with stack := xt :: rest }
@@ -483,21 +498,34 @@ def dropCommentTokens (startLine : Nat) : List SourceToken → Except RuntimeErr
 
 mutual
   /-- Execute one compiled operation. -/
-  partial def executeOp (dict : RuntimeDictionary) (state : RuntimeState) : Op → Except RuntimeError RuntimeState
-    | .push n => Except.ok (pushValue state n)
-    | .emitText text => Except.ok (appendOutput state text)
+  partial def executeOp (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) : Op → Except RuntimeError ExecResult
+    | .push n => Except.ok <| continueExec (pushValue state n)
+    | .emitText text => Except.ok <| continueExec (appendOutput state text)
     | .call name line =>
-        match lookupWord dict name with
-        | some (.prim run) => run line state
-        | some (.compiled ops) => executeOps dict state ops
-        | none => Except.error (.unknownWord name line)
+        if name == "EXIT" then
+          if allowExit then
+            Except.ok <| exitExec state
+          else
+            Except.error (.invalidPrimitiveUse "EXIT" line)
+        else
+          match lookupWord dict name with
+          | some (.prim run) => do
+              let nextState ← run line state
+              Except.ok <| continueExec nextState
+          | some (.compiled ops) => do
+              let result ← executeOps dict true state ops
+              Except.ok <| continueExec result.state
+          | none => Except.error (.unknownWord name line)
 
   /-- Execute compiled operations from left to right. -/
-  partial def executeOps (dict : RuntimeDictionary) (state : RuntimeState) : List Op → Except RuntimeError RuntimeState
-    | [] => Except.ok state
+  partial def executeOps (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) : List Op → Except RuntimeError ExecResult
+    | [] => Except.ok <| continueExec state
     | op :: rest => do
-        let nextState ← executeOp dict state op
-        executeOps dict nextState rest
+        let result ← executeOp dict allowExit state op
+        if result.exited then
+          Except.ok result
+        else
+          executeOps dict allowExit result.state rest
 end
 
 /-- Execute a token immediately while compiling a definition. -/
@@ -506,17 +534,17 @@ partial def executeImmediateToken
     (state : DefinitionCompileState)
     (token : SourceToken)
     : Except RuntimeError DefinitionCompileState := do
-  let runtimeState ← executeOp dict
+  let runtimeState ← executeOp dict false
     { stack := state.compileStack, output := "", cells := state.compileCells
       , here := state.compileHere, latest := state.compileLatest, base := state.base }
     (compileToken state.base token)
   Except.ok
     { state with
-        compileStack := runtimeState.stack
-        compileCells := runtimeState.cells
-        compileHere := runtimeState.here
-        compileLatest := runtimeState.latest
-        base := runtimeState.base }
+        compileStack := runtimeState.state.stack
+        compileCells := runtimeState.state.cells
+        compileHere := runtimeState.state.here
+        compileLatest := runtimeState.state.latest
+        base := runtimeState.state.base }
 
 /-- Compile a token as a call, even if the word is immediate. -/
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
@@ -695,7 +723,8 @@ def evalRuntimeTokens (dict : RuntimeDictionary) (base : Nat) (tokens : List Sou
   let istate : InterpState := { dict, base, here := 0, cells := [], latest := 0 }
   let (nextIstate, ops) ← interpretTokens istate [] tokens
   let initState : RuntimeState := { stack := [], output := "", here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
-  executeOps nextIstate.dict initState ops
+  let result ← executeOps nextIstate.dict false initState ops
+  return result.state
 
 /-- Evaluate source tokens against an existing dictionary and runtime state. -/
 def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken) : Except RuntimeError RuntimeSession := do
@@ -704,8 +733,8 @@ def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken)
       , cells := session.state.cells, latest := session.state.latest }
   let (nextIstate, ops) ← interpretTokens istate [] tokens
   let initState : RuntimeState := { session.state with here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
-  let nextState ← executeOps nextIstate.dict initState ops
-  Except.ok { dict := nextIstate.dict, state := { nextState with base := nextIstate.base } }
+  let nextState ← executeOps nextIstate.dict false initState ops
+  Except.ok { dict := nextIstate.dict, state := { nextState.state with base := nextIstate.base } }
 
 /-- Parse and evaluate source text in one step. -/
 def runRuntime (source : String) : Except RuntimeError RuntimeState := do

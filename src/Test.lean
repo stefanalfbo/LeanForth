@@ -59,6 +59,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard lookupWord initialDictionary "LITSTRING" |>.isSome
 #guard lookupWord initialDictionary "BRANCH" |>.isSome
 #guard lookupWord initialDictionary "0BRANCH" |>.isSome
+#guard lookupWord initialDictionary "EXIT" |>.isSome
 #guard lookupWord initialDictionary ">CFA" |>.isSome
 #guard lookupWord initialDictionary "@" |>.isSome
 #guard lookupWord initialDictionary "!" |>.isSome
@@ -135,6 +136,8 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x") { stack := [5], output := "" }
 #guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y") { stack := [5], output := "" }
 #guard expectState (runRuntime ": xt-word ' dup ; xt-word ' DUP =") { stack := [1], output := "" }
+#guard expectState (runRuntime ": stop-here 1 EXIT 2 ; stop-here") { stack := [1], output := "" }
+#guard expectState (runRuntime ": inner 2 EXIT 3 ; : outer 1 inner 4 ; outer") { stack := [4, 2, 1], output := "" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
@@ -142,6 +145,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "LITSTRING" == .error (.invalidPrimitiveUse "LITSTRING" 1)
 #guard runRuntime "BRANCH" == .error (.invalidPrimitiveUse "BRANCH" 1)
 #guard runRuntime "0BRANCH" == .error (.invalidPrimitiveUse "0BRANCH" 1)
+#guard runRuntime "EXIT" == .error (.invalidPrimitiveUse "EXIT" 1)
 #guard runRuntime "+" == .error (.stackUnderflow "+" 1)
 #guard runRuntime "/" == .error (.stackUnderflow "/" 1)
 #guard runRuntime "=" == .error (.stackUnderflow "=" 1)
