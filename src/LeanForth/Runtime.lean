@@ -288,6 +288,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | _ => Except.error (.stackUnderflow "TELL" line))
   , builtin "HERE" (fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , builtin "LATEST" (fun _ state => Except.ok { state with stack := latestAddress :: state.stack })
+  , builtin "[']" (fun line _ => Except.error (.invalidPrimitiveUse "[']" line))
   , builtin "LIT" (fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
   , builtin "LITSTRING" (fun line _ => Except.error (.invalidPrimitiveUse "LITSTRING" line))
   , builtin "BRANCH" (fun line _ => Except.error (.invalidPrimitiveUse "BRANCH" line))
@@ -722,7 +723,12 @@ partial def compileDefinitionTokens
           compileDefinitionTokens dict word startLine nextState remaining
       | false, "'", [] =>
           Except.error (.stackUnderflow "'" token.line)
+      | false, "[']", [] =>
+          Except.error (.stackUnderflow "[']" token.line)
       | false, "'", nextTok :: remaining => do
+          let nextState ← compileExecutionToken dict nextTok state
+          compileDefinitionTokens dict word startLine nextState remaining
+      | false, "[']", nextTok :: remaining => do
           let nextState ← compileExecutionToken dict nextTok state
           compileDefinitionTokens dict word startLine nextState remaining
       | false, "[", _ =>
