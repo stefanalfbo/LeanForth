@@ -143,6 +143,11 @@ def writeCell (cells : List (Int × Int)) (addr : Int) (value : Int) : List (Int
       else
         (cellAddr, current) :: writeCell rest addr value
 
+/-- Read a string of character cells from consecutive addresses. -/
+def readCellString (cells : List (Int × Int)) (addr : Int) (len : Nat) : String :=
+  String.ofList <| (List.range len).map fun i =>
+    Char.ofNat <| Int.toNat <| (readCell cells (addr + Int.ofNat i)).getD 0
+
 /--
 A dedicated address designator for the synthetic HERE cell.
 This is fixed for identity comparisons and does not vary with the current `here` value.
@@ -231,6 +236,15 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | ch :: rest =>
           Except.ok <| appendOutput { state with stack := rest } (String.singleton (Char.ofNat ch.toNat))
       | _ => Except.error (.stackUnderflow "EMIT" line))
+  , builtin "TELL" (fun line state =>
+      match state.stack with
+      | len :: addr :: rest =>
+          if len < 0 then
+            Except.error (.invalidAddress len line)
+          else
+            let text := readCellString state.cells addr len.toNat
+            Except.ok <| appendOutput { state with stack := rest } text
+      | _ => Except.error (.stackUnderflow "TELL" line))
   , builtin "HERE" (fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , builtin "LATEST" (fun _ state => Except.ok { state with stack := latestAddress :: state.stack })
   , builtin "LIT" (fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))

@@ -52,6 +52,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard lookupWord initialDictionary "1-" |>.isSome
 #guard lookupWord initialDictionary "KEY" |>.isSome
 #guard lookupWord initialDictionary "EMIT" |>.isSome
+#guard lookupWord initialDictionary "TELL" |>.isSome
 #guard lookupWord initialDictionary "HERE" |>.isSome
 #guard lookupWord initialDictionary "LATEST" |>.isSome
 #guard lookupWord initialDictionary "LIT" |>.isSome
@@ -79,6 +80,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "41 1-" == .ok { stack := [40], output := "" }
 #guard runRuntime "KEY" == .ok { stack := [0], output := "", here := 0 }
 #guard runRuntime "65 EMIT" == .ok { stack := [], output := "A", here := 0 }
+#guard runRuntime "65 , 66 , 0 2 TELL" == .ok { stack := [], output := "AB", cells := [(0, 65), (1, 66)], here := 2 }
 #guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
@@ -149,6 +151,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "1 0 /" == .error (.divisionByZero "/" 1)
 #guard runRuntime "1 0 MOD" == .error (.divisionByZero "MOD" 1)
 #guard runRuntime "1 0 /MOD" == .error (.divisionByZero "/MOD" 1)
+#guard runRuntime "TELL" == .error (.stackUnderflow "TELL" 1)
 #guard runRuntime "." == .error (.stackUnderflow "." 1)
 #guard runRuntime ":" == .error (.invalidDefinition 1)
 #guard runRuntime ": sq dup *" == .error (.missingSemicolon "sq" 1)
