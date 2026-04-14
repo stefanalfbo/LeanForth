@@ -138,6 +138,9 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard expectState (runRuntime ": xt-word ' dup ; xt-word ' DUP =") { stack := [1], output := "" }
 #guard expectState (runRuntime ": stop-here 1 EXIT 2 ; stop-here") { stack := [1], output := "" }
 #guard expectState (runRuntime ": inner 2 EXIT 3 ; : outer 1 inner 4 ; outer") { stack := [4, 2, 1], output := "" }
+#guard expectState (runRuntime ": pick IF 111 ELSE 222 THEN ; 0 pick") { stack := [222], output := "" }
+#guard expectState (runRuntime ": pick IF 111 ELSE 222 THEN ; 7 pick") { stack := [111], output := "" }
+#guard expectState (runRuntime ": countdown BEGIN dup WHILE 1- REPEAT ; 3 countdown") { stack := [0], output := "" }
 
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)

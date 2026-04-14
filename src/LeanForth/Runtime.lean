@@ -42,6 +42,8 @@ inductive Op where
   | push (n : Int)
   | call (name : String) (line : Nat)
   | emitText (text : String)
+  | jump (target : Nat)
+  | jumpIfZero (target : Nat) (line : Nat)
   deriving Repr, DecidableEq, BEq
 
 /-- Dictionary entries supported by the runtime. -/
@@ -149,6 +151,17 @@ def writeCell (cells : List (Int × Int)) (addr : Int) (value : Int) : List (Int
       else
         (cellAddr, current) :: writeCell rest addr value
 
+/-- Ensure every code address below `here` is writable during compile-time backpatching. -/
+def populateCellsThrough (cells : List (Int × Int)) (here : Int) : List (Int × Int) :=
+  if here <= 0 then
+    cells
+  else
+    (List.range here.toNat).foldl
+      (fun acc addr =>
+        let addr := Int.ofNat addr
+        if (readCell acc addr).isSome then acc else writeCell acc addr 0)
+      cells
+
 /-- Read a string of character cells from consecutive addresses. -/
 def readCellString (cells : List (Int × Int)) (addr : Int) (len : Nat) : String :=
   String.ofList <| (List.range len).map fun i =>
@@ -177,6 +190,20 @@ def exitExec (state : RuntimeState) : ExecResult :=
 /-- Helper to keep built-in table entries monomorphic for Lean's elaborator. -/
 def builtin (name : String) (handler : BuiltinHandler) : String × BuiltinHandler :=
   (name, handler)
+
+/-- Replace the operation at `idx` if it exists. -/
+def replaceOpAt (ops : List Op) (idx : Nat) (op : Op) : List Op :=
+  match ops, idx with
+  | [], _ => []
+  | _ :: rest, 0 => op :: rest
+  | current :: rest, idx + 1 => current :: replaceOpAt rest idx op
+
+/-- Read the operation at `idx` if it exists. -/
+def getOpAt? (ops : List Op) (idx : Nat) : Option Op :=
+  match ops, idx with
+  | [], _ => none
+  | op :: _, 0 => some op
+  | _ :: rest, idx + 1 => getOpAt? rest idx
 
 /-- Built-in arithmetic, stack, and output words. -/
 def builtinDefs : List (String × BuiltinHandler) :=
@@ -497,10 +524,12 @@ def dropCommentTokens (startLine : Nat) : List SourceToken → Except RuntimeErr
         dropCommentTokens startLine rest
 
 mutual
-  /-- Execute one compiled operation. -/
+  /-- Execute one non-branch compiled operation. -/
   partial def executeOp (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) : Op → Except RuntimeError ExecResult
     | .push n => Except.ok <| continueExec (pushValue state n)
     | .emitText text => Except.ok <| continueExec (appendOutput state text)
+    | .jump _ => Except.ok <| continueExec state
+    | .jumpIfZero _ _ => Except.ok <| continueExec state
     | .call name line =>
         if name == "EXIT" then
           if allowExit then
@@ -517,15 +546,37 @@ mutual
               Except.ok <| continueExec result.state
           | none => Except.error (.unknownWord name line)
 
-  /-- Execute compiled operations from left to right. -/
-  partial def executeOps (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) : List Op → Except RuntimeError ExecResult
-    | [] => Except.ok <| continueExec state
-    | op :: rest => do
+  /-- Execute compiled operations from left to right, honoring branch targets. -/
+  partial def executeOpsAt
+      (dict : RuntimeDictionary)
+      (allowExit : Bool)
+      (ops : List Op)
+      (pc : Nat)
+      (state : RuntimeState)
+      : Except RuntimeError ExecResult := do
+    match getOpAt? ops pc with
+    | none => Except.ok <| continueExec state
+    | some (.jump target) =>
+        executeOpsAt dict allowExit ops target state
+    | some (.jumpIfZero target line) =>
+        match state.stack with
+        | value :: rest =>
+            if value == 0 then
+              executeOpsAt dict allowExit ops target { state with stack := rest }
+            else
+              executeOpsAt dict allowExit ops (pc + 1) { state with stack := rest }
+        | _ => Except.error (.stackUnderflow "0BRANCH" line)
+    | some op => do
         let result ← executeOp dict allowExit state op
         if result.exited then
           Except.ok result
         else
-          executeOps dict allowExit result.state rest
+          executeOpsAt dict allowExit ops (pc + 1) result.state
+
+  /-- Execute a compiled operation list. -/
+  partial def executeOps (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) (ops : List Op)
+      : Except RuntimeError ExecResult :=
+    executeOpsAt dict allowExit ops 0 state
 end
 
 /-- Execute a token immediately while compiling a definition. -/
@@ -534,8 +585,9 @@ partial def executeImmediateToken
     (state : DefinitionCompileState)
     (token : SourceToken)
     : Except RuntimeError DefinitionCompileState := do
+  let compileCells := populateCellsThrough state.compileCells state.compileHere
   let runtimeState ← executeOp dict false
-    { stack := state.compileStack, output := "", cells := state.compileCells
+    { stack := state.compileStack, output := "", cells := compileCells
       , here := state.compileHere, latest := state.compileLatest, base := state.base }
     (compileToken state.base token)
   Except.ok
@@ -549,6 +601,14 @@ partial def executeImmediateToken
 /-- Compile a token as a call, even if the word is immediate. -/
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
   { state with opsRev := compileToken state.base token :: state.opsRev, compileHere := state.compileHere + 1 }
+
+/-- Emit one compiled operation into the current definition. -/
+def emitCompiledOp (op : Op) (state : DefinitionCompileState) : DefinitionCompileState :=
+  { state with opsRev := op :: state.opsRev, compileHere := state.compileHere + 1 }
+
+/-- Patch a previously emitted control-flow operation. -/
+def patchCompiledOp (idx : Int) (op : Op) (state : DefinitionCompileState) : DefinitionCompileState :=
+  { state with opsRev := replaceOpAt state.opsRev.reverse idx.toNat op |>.reverse }
 
 /-- Compile a literal execution token for the next parsed word. -/
 def compileExecutionToken (dict : RuntimeDictionary) (token : SourceToken) (state : DefinitionCompileState)
@@ -589,6 +649,61 @@ partial def compileDefinitionTokens
           compileDefinitionTokens dict word startLine nextState rest
       | false, ";", _ =>
           Except.ok (state, rest)
+      | false, "IF", _ =>
+          let nextState := emitCompiledOp (.jumpIfZero 0 token.line) state
+          compileDefinitionTokens dict word startLine
+            { nextState with compileStack := state.compileHere :: nextState.compileStack } rest
+      | false, "THEN", _ =>
+          match state.compileStack with
+          | branchIdx :: remainingStack =>
+              let patchedOp :=
+                match getOpAt? state.opsRev.reverse branchIdx.toNat with
+                | some (Op.jump _) => Op.jump state.compileHere.toNat
+                | _ => Op.jumpIfZero state.compileHere.toNat token.line
+              let nextState := patchCompiledOp branchIdx patchedOp { state with compileStack := remainingStack }
+              compileDefinitionTokens dict word startLine nextState rest
+          | [] => Except.error (.stackUnderflow "THEN" token.line)
+      | false, "ELSE", _ =>
+          match state.compileStack with
+          | branchIdx :: remainingStack =>
+              let branchTarget := state.compileHere
+              let emittedState := emitCompiledOp (.jump 0) { state with compileStack := remainingStack }
+              let patchedState := patchCompiledOp branchIdx (Op.jumpIfZero emittedState.compileHere.toNat token.line) emittedState
+              compileDefinitionTokens dict word startLine
+                { patchedState with compileStack := branchTarget :: patchedState.compileStack } rest
+          | [] => Except.error (.stackUnderflow "ELSE" token.line)
+      | false, "BEGIN", _ =>
+          compileDefinitionTokens dict word startLine
+            { state with compileStack := state.compileHere :: state.compileStack } rest
+      | false, "UNTIL", _ =>
+          match state.compileStack with
+          | beginIdx :: remainingStack =>
+              let nextState := emitCompiledOp (.jumpIfZero beginIdx.toNat token.line)
+                { state with compileStack := remainingStack }
+              compileDefinitionTokens dict word startLine nextState rest
+          | [] => Except.error (.stackUnderflow "UNTIL" token.line)
+      | false, "AGAIN", _ =>
+          match state.compileStack with
+          | beginIdx :: remainingStack =>
+              let nextState := emitCompiledOp (.jump beginIdx.toNat) { state with compileStack := remainingStack }
+              compileDefinitionTokens dict word startLine nextState rest
+          | [] => Except.error (.stackUnderflow "AGAIN" token.line)
+      | false, "WHILE", _ =>
+          match state.compileStack with
+          | beginIdx :: remainingStack =>
+              let nextState := emitCompiledOp (.jumpIfZero 0 token.line)
+                { state with compileStack := remainingStack }
+              compileDefinitionTokens dict word startLine
+                { nextState with compileStack := state.compileHere :: beginIdx :: nextState.compileStack } rest
+          | [] => Except.error (.stackUnderflow "WHILE" token.line)
+      | false, "REPEAT", _ =>
+          match state.compileStack with
+          | branchIdx :: beginIdx :: remainingStack =>
+              let emittedState := emitCompiledOp (.jump beginIdx.toNat)
+                { state with compileStack := remainingStack }
+              let patchedState := patchCompiledOp branchIdx (Op.jumpIfZero emittedState.compileHere.toNat token.line) emittedState
+              compileDefinitionTokens dict word startLine patchedState rest
+          | _ => Except.error (.stackUnderflow "REPEAT" token.line)
       | false, "(", _ => do
           let remaining ← dropCommentTokens token.line rest
           compileDefinitionTokens dict word startLine state remaining
