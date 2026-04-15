@@ -135,6 +135,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard expectState (runRuntime ": semicolon [ CHAR ; ] LITERAL ; semicolon") { stack := [59], output := "" }
 #guard expectState (runRuntime ": ':' [ CHAR : ] LITERAL ; ':'") { stack := [58], output := "" }
 #guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x") { stack := [5], output := "" }
+#guard expectState (runRuntime ": push-six 6 ; IMMEDIATE : x push-six LITERAL ; x") { stack := [6], output := "" }
 #guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y") { stack := [5], output := "" }
 #guard expectState (runRuntime ": xt-word ' dup ; xt-word ' DUP =") { stack := [1], output := "" }
 #guard expectState (runRuntime ": xt-word ['] dup ; xt-word ' DUP =") { stack := [1], output := "" }

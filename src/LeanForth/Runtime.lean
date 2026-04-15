@@ -126,6 +126,12 @@ def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) (imme
 def defineWordWithXt (dict : RuntimeDictionary) (name : String) (word : WordDef) (xt : Int) (immediate := false) : RuntimeDictionary :=
   (name, { word := word, immediate := immediate, xt := xt }) :: dict
 
+/-- Mark the most recently defined word in the dictionary as immediate. -/
+def setLatestImmediate (dict : RuntimeDictionary) : RuntimeDictionary :=
+  match dict with
+  | [] => []
+  | (name, entry) :: rest => (name, { entry with immediate := true }) :: rest
+
 /-- Push a value onto the stack. -/
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
   { state with stack := n :: state.stack }
@@ -836,6 +842,8 @@ partial def interpretTokens
         | [] => Except.error (.unterminatedString token.line)
         | textTok :: remaining =>
             interpretTokens istate (.emitText textTok.text :: opsRev) remaining
+      else if token.text == "IMMEDIATE" then
+        interpretTokens { istate with dict := setLatestImmediate istate.dict } opsRev rest
       else
         interpretTokens istate (compileToken istate.base token :: opsRev) rest
 
