@@ -7,16 +7,6 @@ The head of the list is the top of the stack.
 -/
 abbrev RuntimeStack := List Int
 
-/-- The current machine state. -/
-structure RuntimeState where
-  stack : RuntimeStack
-  output : String
-  cells : List (Int × Int) := []
-  here : Int := 0
-  latest : Int := 0
-  base : Nat := 10
-  deriving Repr, DecidableEq, BEq, Inhabited
-
 /-- A token paired with its source line number. -/
 structure SourceToken where
   text : String
@@ -41,10 +31,26 @@ inductive RuntimeError where
 inductive Op where
   | push (n : Int)
   | call (name : String) (line : Nat)
+  /-- Like `call`, but when executed during immediate-mode compilation, also
+      appends `Op.call name` to the caller's `opsRev` (POSTPONE semantics). -/
+  | compileCall (name : String) (line : Nat)
   | emitText (text : String)
   | jump (target : Nat)
   | jumpIfZero (target : Nat) (line : Nat)
   deriving Repr, DecidableEq, BEq
+
+/-- The current machine state. -/
+structure RuntimeState where
+  stack : RuntimeStack
+  output : String
+  cells : List (Int × Int) := []
+  here : Int := 0
+  latest : Int := 0
+  base : Nat := 10
+  /-- Ops collected by `compileCall` during an immediate-mode execution,
+      to be appended to the caller's `opsRev` by `executeImmediateToken`. -/
+  compilePending : List Op := []
+  deriving Repr, DecidableEq, BEq, Inhabited
 
 /-- Dictionary entries supported by the runtime. -/
 inductive WordDef where
@@ -537,6 +543,18 @@ mutual
     | .emitText text => Except.ok <| continueExec (appendOutput state text)
     | .jump _ => Except.ok <| continueExec state
     | .jumpIfZero _ _ => Except.ok <| continueExec state
+    | .compileCall name line => do
+        -- Record the call in compilePending (read by executeImmediateToken),
+        -- then also execute the word so runtime use works normally.
+        let stateWithPending := { state with compilePending := state.compilePending ++ [.call name line] }
+        match lookupWord dict name with
+        | some (.prim run) => do
+            let nextState ← run line stateWithPending
+            Except.ok <| continueExec nextState
+        | some (.compiled ops) => do
+            let result ← executeOps dict true stateWithPending ops
+            Except.ok <| continueExec result.state
+        | none => Except.error (.unknownWord name line)
     | .call name line =>
         if name == "EXIT" then
           if allowExit then
@@ -595,15 +613,18 @@ partial def executeImmediateToken
   let compileCells := populateCellsThrough state.compileCells state.compileHere
   let runtimeState ← executeOp dict false
     { stack := state.compileStack, output := "", cells := compileCells
-      , here := state.compileHere, latest := state.compileLatest, base := state.base }
+      , here := state.compileHere, latest := state.compileLatest, base := state.base
+      , compilePending := [] }
     (compileToken state.base token)
+  let pending := runtimeState.state.compilePending
   Except.ok
     { state with
         compileStack := runtimeState.state.stack
         compileCells := runtimeState.state.cells
-        compileHere := runtimeState.state.here
+        compileHere := runtimeState.state.here + pending.length
         compileLatest := runtimeState.state.latest
-        base := runtimeState.state.base }
+        base := runtimeState.state.base
+        opsRev := pending.reverse ++ state.opsRev }
 
 /-- Compile a token as a call, even if the word is immediate. -/
 def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
@@ -716,6 +737,13 @@ partial def compileDefinitionTokens
           compileDefinitionTokens dict word startLine state remaining
       | false, "IMMEDIATE", _ =>
           compileDefinitionTokens dict word startLine { state with definingWordImmediate := true } rest
+      | false, "POSTPONE", [] =>
+          Except.error (.unknownWord "POSTPONE" token.line)
+      | false, "POSTPONE", nextTok :: remaining =>
+          let nextState := { state with
+            opsRev := .compileCall nextTok.text nextTok.line :: state.opsRev
+            compileHere := state.compileHere + 1 }
+          compileDefinitionTokens dict word startLine nextState remaining
       | false, "[COMPILE]", [] =>
           Except.error (.unknownWord "[COMPILE]" token.line)
       | false, "[COMPILE]", nextTok :: remaining =>
@@ -853,7 +881,7 @@ def evalRuntimeTokens (dict : RuntimeDictionary) (base : Nat) (tokens : List Sou
   let (nextIstate, ops) ← interpretTokens istate [] tokens
   let initState : RuntimeState := { stack := [], output := "", here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
   let result ← executeOps nextIstate.dict false initState ops
-  return result.state
+  return { result.state with compilePending := [] }
 
 /-- Evaluate source tokens against an existing dictionary and runtime state. -/
 def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken) : Except RuntimeError RuntimeSession := do
@@ -863,7 +891,7 @@ def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken)
   let (nextIstate, ops) ← interpretTokens istate [] tokens
   let initState : RuntimeState := { session.state with here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
   let nextState ← executeOps nextIstate.dict false initState ops
-  Except.ok { dict := nextIstate.dict, state := { nextState.state with base := nextIstate.base } }
+  Except.ok { dict := nextIstate.dict, state := { nextState.state with base := nextIstate.base, compilePending := [] } }
 
 /-- Parse and evaluate source text in one step. -/
 def runRuntime (source : String) : Except RuntimeError RuntimeState := do

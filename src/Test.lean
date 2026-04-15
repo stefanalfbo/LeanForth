@@ -137,6 +137,10 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : x push-five LITERAL ; x") { stack := [5], output := "" }
 #guard expectState (runRuntime ": push-six 6 ; IMMEDIATE : x push-six LITERAL ; x") { stack := [6], output := "" }
 #guard expectState (runRuntime ": push-five IMMEDIATE 5 ; : y [COMPILE] push-five ; y") { stack := [5], output := "" }
+-- POSTPONE compiles a non-immediate word as a deferred call
+#guard expectState (runRuntime ": doit 42 ; : make-doit POSTPONE doit ; IMMEDIATE : x make-doit ; x") { stack := [42], output := "" }
+-- POSTPONE compiles an immediate word as a deferred call (without executing it immediately)
+#guard expectState (runRuntime ": doit 99 ; IMMEDIATE : wrap POSTPONE doit ; wrap") { stack := [99], output := "" }
 #guard expectState (runRuntime ": xt-word ' dup ; xt-word ' DUP =") { stack := [1], output := "" }
 #guard expectState (runRuntime ": xt-word ['] dup ; xt-word ' DUP =") { stack := [1], output := "" }
 #guard expectState (runRuntime ": stop-here 1 EXIT 2 ; stop-here") { stack := [1], output := "" }
