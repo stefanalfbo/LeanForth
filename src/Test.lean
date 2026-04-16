@@ -149,6 +149,11 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard expectState (runRuntime ": pick IF 111 ELSE 222 THEN ; 7 pick") { stack := [111], output := "" }
 #guard expectState (runRuntime ": countdown BEGIN dup WHILE 1- REPEAT ; 3 countdown") { stack := [0], output := "" }
 
+-- STATE @ returns 0 when interpreting, non-zero when compiling (immediate word context)
+#guard runRuntime "STATE @" == .ok { stack := [0], output := "" }
+-- when gt8 runs as immediate during compilation, STATE @ returns non-zero (-1); gt9 captures that value via LITERAL
+#guard expectState (runRuntime ": gt8 STATE @ ; IMMEDIATE : gt9 gt8 LITERAL ; gt9") { stack := [-1], output := "" }
+
 -- unknown words and underflow now surface explicit interpreter errors
 #guard runRuntime "nope" == .error (.unknownWord "nope" 1)
 #guard runRuntime "LIT" == .error (.invalidPrimitiveUse "LIT" 1)

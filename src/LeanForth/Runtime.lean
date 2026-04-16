@@ -50,6 +50,8 @@ structure RuntimeState where
   /-- Ops collected by `compileCall` during an immediate-mode execution,
       to be appended to the caller's `opsRev` by `executeImmediateToken`. -/
   compilePending : List Op := []
+  /-- True when executing inside a colon definition (for STATE @). -/
+  compiling : Bool := false
   deriving Repr, DecidableEq, BEq, Inhabited
 
 /-- Dictionary entries supported by the runtime. -/
@@ -188,6 +190,9 @@ def hereAddress : Int := -314159265
 /-- A dedicated address designator for the synthetic LATEST cell. -/
 def latestAddress : Int := -314159266
 
+/-- A dedicated address designator for the synthetic STATE cell. -/
+def stateAddress : Int := -314159267
+
 /-- Function type for built-in primitive words. -/
 abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeState
 
@@ -300,6 +305,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | _ => Except.error (.stackUnderflow "TELL" line))
   , builtin "HERE" (fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , builtin "LATEST" (fun _ state => Except.ok { state with stack := latestAddress :: state.stack })
+  , builtin "STATE" (fun _ state => Except.ok { state with stack := stateAddress :: state.stack })
   , builtin "[']" (fun line _ => Except.error (.invalidPrimitiveUse "[']" line))
   , builtin "LIT" (fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
   , builtin "LITSTRING" (fun line _ => Except.error (.invalidPrimitiveUse "LITSTRING" line))
@@ -317,6 +323,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
             Except.ok { state with stack := state.here :: rest }
           else if addr == latestAddress then
             Except.ok { state with stack := state.latest :: rest }
+          else if addr == stateAddress then
+            Except.ok { state with stack := (if state.compiling then -1 else 0) :: rest }
           else if let some value := readCell state.cells addr then
             Except.ok { state with stack := value :: rest }
           else
@@ -614,7 +622,7 @@ partial def executeImmediateToken
   let runtimeState ← executeOp dict false
     { stack := state.compileStack, output := "", cells := compileCells
       , here := state.compileHere, latest := state.compileLatest, base := state.base
-      , compilePending := [] }
+      , compilePending := [], compiling := true }
     (compileToken state.base token)
   let pending := runtimeState.state.compilePending
   Except.ok
