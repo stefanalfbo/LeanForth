@@ -165,6 +165,16 @@ def writeCell (cells : List (Int × Int)) (addr : Int) (value : Int) : List (Int
       else
         (cellAddr, current) :: writeCell rest addr value
 
+theorem readCell_writeCell (cells : List (Int × Int)) (addr value : Int) :
+    readCell (writeCell cells addr value) addr = some value := by
+  induction cells with
+  | nil => simp [writeCell, readCell]
+  | cons head tail ih =>
+      simp [writeCell]
+      split
+      · simp [readCell, *]
+      · simp [readCell, *]
+
 /-- Ensure every code address below `here` is writable during compile-time backpatching. -/
 def populateCellsThrough (cells : List (Int × Int)) (here : Int) : List (Int × Int) :=
   if here <= 0 then
