@@ -225,6 +225,15 @@ def replaceOpAt (ops : List Op) (idx : Nat) (op : Op) : List Op :=
   | _ :: rest, 0 => op :: rest
   | current :: rest, idx + 1 => current :: replaceOpAt rest idx op
 
+theorem replaceOpAt_length (ops : List Op) (idx : Nat) (op : Op) :
+    (replaceOpAt ops idx op).length = ops.length := by
+  induction ops generalizing idx with
+  | nil => simp [replaceOpAt]
+  | cons head tail ih =>
+      match idx with
+      | 0 => simp [replaceOpAt]
+      | n + 1 => simp [replaceOpAt, ih]
+
 /-- Read the operation at `idx` if it exists. -/
 def getOpAt? (ops : List Op) (idx : Nat) : Option Op :=
   match ops, idx with
