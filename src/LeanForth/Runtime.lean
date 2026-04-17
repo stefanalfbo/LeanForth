@@ -130,6 +130,10 @@ def defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) (imme
   let xt := nextExecutionToken dict
   (name, { word := word, immediate := immediate, xt := xt }) :: dict
 
+theorem lookupEntry_defineWord (dict : RuntimeDictionary) (name : String) (word : WordDef) :
+    (lookupEntry (defineWord dict name word) name).isSome = true := by
+  simp [defineWord, lookupEntry]
+
 /-- Add or shadow a dictionary entry with an explicitly chosen execution token. -/
 def defineWordWithXt (dict : RuntimeDictionary) (name : String) (word : WordDef) (xt : Int) (immediate := false) : RuntimeDictionary :=
   (name, { word := word, immediate := immediate, xt := xt }) :: dict
