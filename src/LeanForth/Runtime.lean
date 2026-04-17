@@ -214,9 +214,11 @@ abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeSta
 def continueExec (state : RuntimeState) : ExecResult :=
   { state := state, exited := false }
 
-/-- Return early from the current compiled word. -/
 def exitExec (state : RuntimeState) : ExecResult :=
   { state := state, exited := true }
+
+theorem continueExec_not_exited (s : RuntimeState) : (continueExec s).exited = false := rfl
+theorem exitExec_exited (s : RuntimeState) : (exitExec s).exited = true := rfl
 
 /-- Helper to keep built-in table entries monomorphic for Lean's elaborator. -/
 def builtin (name : String) (handler : BuiltinHandler) : String × BuiltinHandler :=
