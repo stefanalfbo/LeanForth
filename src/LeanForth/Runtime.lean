@@ -144,6 +144,10 @@ def setLatestImmediate (dict : RuntimeDictionary) : RuntimeDictionary :=
 def pushValue (state : RuntimeState) (n : Int) : RuntimeState :=
   { state with stack := n :: state.stack }
 
+theorem pushValue_length (s : RuntimeState) (n : Int) :
+    (pushValue s n).stack.length = s.stack.length + 1 := by
+  simp [pushValue]
+
 /-- Append text to the output buffer. -/
 def appendOutput (state : RuntimeState) (text : String) : RuntimeState :=
   { state with output := state.output ++ text }
