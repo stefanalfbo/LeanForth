@@ -185,5 +185,16 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "'" == .error (.stackUnderflow "'" 1)
 #guard runRuntime "1\n]" == .error (.unknownWord "]" 2)
 
+-- A defining word (compiled word whose first op is CREATE) registers its
+-- created word in the dictionary at interpretation time, so that tick (`'`)
+-- can resolve the name before the defining word is executed at runtime.
+#guard match runRuntimeFrom initialRuntimeSession ": MYMAKE CREATE ;\nMYMAKE MYWORD" with
+  | .ok session => (lookupWord session.dict "MYWORD").isSome
+  | .error _ => false
+-- Tick resolves the created word's execution token after the defining word.
+#guard match runRuntimeFrom initialRuntimeSession ": MYMAKE CREATE ;\nMYMAKE MYWORD\n' MYWORD" with
+  | .ok session => session.state.stack.length == 1
+  | .error _ => false
+
 def main : IO Unit :=
   IO.println "All tests passed!"

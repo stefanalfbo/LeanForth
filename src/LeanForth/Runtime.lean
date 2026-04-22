@@ -910,7 +910,21 @@ partial def interpretTokens
       else if token.text == "IMMEDIATE" then
         interpretTokens { istate with dict := setLatestImmediate istate.dict } opsRev rest
       else
-        interpretTokens istate (compileToken istate.base token :: opsRev) rest
+        -- If this is a defining word (a compiled word whose first op is CREATE),
+        -- eagerly consume the next token as the created word's name and register
+        -- it in the dictionary.  This lets tick (`'`) resolve the name in
+        -- subsequent tokens even though the defining word hasn't been executed yet.
+        match lookupWord istate.dict token.text with
+        | some (.compiled ((.call "CREATE" _) :: _)) =>
+            match rest with
+            | [] => Except.error (.invalidDefinition token.line)
+            | nameTok :: remaining =>
+                let addr := istate.here
+                let nextDict := defineWord istate.dict nameTok.text (.compiled [.push addr])
+                let nextIstate := { istate with dict := nextDict, latest := latestExecutionToken nextDict }
+                interpretTokens nextIstate opsRev remaining
+        | _ =>
+            interpretTokens istate (compileToken istate.base token :: opsRev) rest
 
 /-- Evaluate a source program token by token from left to right. -/
 def evalRuntimeTokens (dict : RuntimeDictionary) (base : Nat) (tokens : List SourceToken) : Except RuntimeError RuntimeState := do
