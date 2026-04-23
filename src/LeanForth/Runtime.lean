@@ -35,6 +35,7 @@ inductive Op where
       appends `Op.call name` to the caller's `opsRev` (POSTPONE semantics). -/
   | compileCall (name : String) (line : Nat)
   | emitText (text : String)
+  | pushString (text : String)
   | jump (target : Nat)
   | jumpIfZero (target : Nat) (line : Nat)
   deriving Repr, DecidableEq, BEq
@@ -503,6 +504,15 @@ partial def tokenizeChars
       else
         let currentLine := if current.isEmpty then line else currentLine
         tokenizeChars ('"' :: rest) line ('.' :: current) currentLine acc
+  | 'S' :: '"' :: rest =>
+      if current.isEmpty then
+        let (quoteLine, afterWhitespace) := dropLeadingWhitespace line rest
+        let (quoted, remaining, nextLine) ← takeQuotedChars quoteLine afterWhitespace
+        tokenizeChars remaining nextLine [] nextLine
+          ({ text := String.ofList quoted, line := quoteLine } :: { text := "S\"", line := line } :: acc)
+      else
+        let currentLine := if current.isEmpty then line else currentLine
+        tokenizeChars ('"' :: rest) line ('S' :: current) currentLine acc
   | '\\' :: rest =>
       if current.isEmpty then
         let (nextLine, remaining) := dropLineComment line rest
@@ -578,6 +588,18 @@ mutual
   partial def executeOp (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) : Op → Except RuntimeError ExecResult
     | .push n => Except.ok <| continueExec (pushValue state n)
     | .emitText text => Except.ok <| continueExec (appendOutput state text)
+    | .pushString text =>
+        let startAddr := state.here
+        let chars := text.toList
+        let (newCells, _) := chars.foldl
+            (fun (cells, i) ch =>
+                (writeCell cells (startAddr + Int.ofNat i) (Int.ofNat ch.toNat), i + 1))
+            (state.cells, 0)
+        let newHere := startAddr + Int.ofNat chars.length
+        Except.ok <| continueExec { state with
+            stack := Int.ofNat chars.length :: startAddr :: state.stack
+            cells := newCells
+            here := newHere }
     | .jump _ => Except.ok <| continueExec state
     | .jumpIfZero _ _ => Except.ok <| continueExec state
     | .compileCall name line => do
@@ -814,6 +836,11 @@ partial def compileDefinitionTokens
                     compileHere := state.compileHere + 1 }
               compileDefinitionTokens dict word startLine nextState rest
           | [] => Except.error (.stackUnderflow "LITERAL" token.line)
+      | false, "S\"", [] =>
+          Except.error (.unterminatedString token.line)
+      | false, "S\"", textTok :: remaining =>
+          compileDefinitionTokens dict word startLine
+            { state with opsRev := .pushString textTok.text :: state.opsRev, compileHere := state.compileHere + 1 } remaining
       | false, ".\"", [] =>
           Except.error (.unterminatedString token.line)
       | false, ".\"", textTok :: remaining =>
@@ -902,6 +929,11 @@ partial def interpretTokens
                 { (initialDefinitionCompileState istate.base) with compileLatest := xt } remaining
             let nextDict := defineWordWithXt istate.dict nameTok.text (.compiled compileState.opsRev.reverse) xt compileState.definingWordImmediate
             interpretTokens { istate with dict := nextDict, base := compileState.base, latest := xt } opsRev afterDef
+      else if token.text == "S\"" then
+        match rest with
+        | [] => Except.error (.unterminatedString token.line)
+        | textTok :: remaining =>
+            interpretTokens istate (.pushString textTok.text :: opsRev) remaining
       else if token.text == ".\"" then
         match rest with
         | [] => Except.error (.unterminatedString token.line)

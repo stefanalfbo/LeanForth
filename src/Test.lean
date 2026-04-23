@@ -185,6 +185,15 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "'" == .error (.stackUnderflow "'" 1)
 #guard runRuntime "1\n]" == .error (.unknownWord "]" 2)
 
+-- S" pushes (addr, len) and stores char codes in memory cells
+#guard match runRuntime "S\" hello\"" with
+  | .ok state => state.stack == [5, 0] && state.here == 5
+  | .error _ => false
+-- S" inside a compiled word pushes addr and length at runtime
+#guard match runRuntimeFrom initialRuntimeSession ": getstr S\" hi\" ; getstr" with
+  | .ok session => session.state.stack == [2, 0] && session.state.here == 2
+  | .error _ => false
+
 -- A defining word (compiled word whose first op is CREATE) registers its
 -- created word in the dictionary at interpretation time, so that tick (`'`)
 -- can resolve the name before the defining word is executed at runtime.
