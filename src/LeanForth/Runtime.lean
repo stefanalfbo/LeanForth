@@ -36,6 +36,7 @@ inductive Op where
   | compileCall (name : String) (line : Nat)
   | emitText (text : String)
   | pushString (text : String)
+  | evaluate (line : Nat)
   | jump (target : Nat)
   | jumpIfZero (target : Nat) (line : Nat)
   deriving Repr, DecidableEq, BEq
@@ -78,6 +79,7 @@ structure RuntimeSession where
 structure ExecResult where
   state : RuntimeState
   exited : Bool := false
+  updatedDict : Option RuntimeDictionary := none
   deriving Inhabited, Nonempty
 
 instance : BEq (Except RuntimeError RuntimeState) where
@@ -583,6 +585,32 @@ def dropCommentTokens (startLine : Nat) : List SourceToken → Except RuntimeErr
       else
         dropCommentTokens startLine rest
 
+/-- Interpretation-phase state threaded through interpretTokens. -/
+structure InterpState where
+  dict : RuntimeDictionary
+  base : Nat
+  here : Int
+  cells : List (Int × Int)
+  latest : Int
+
+/-- Compile a token as a call, even if the word is immediate. -/
+def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
+  { state with opsRev := compileToken state.base token :: state.opsRev, compileHere := state.compileHere + 1 }
+
+/-- Emit one compiled operation into the current definition. -/
+def emitCompiledOp (op : Op) (state : DefinitionCompileState) : DefinitionCompileState :=
+  { state with opsRev := op :: state.opsRev, compileHere := state.compileHere + 1 }
+
+/-- Patch a previously emitted control-flow operation. -/
+def patchCompiledOp (idx : Int) (op : Op) (state : DefinitionCompileState) : DefinitionCompileState :=
+  { state with opsRev := replaceOpAt state.opsRev.reverse idx.toNat op |>.reverse }
+
+/-- Compile a literal execution token for the next parsed word. -/
+def compileExecutionToken (dict : RuntimeDictionary) (token : SourceToken) (state : DefinitionCompileState)
+    : Except RuntimeError DefinitionCompileState := do
+  let xt ← executionTokenOf dict token
+  Except.ok { state with opsRev := .push xt :: state.opsRev, compileHere := state.compileHere + 1 }
+
 mutual
   /-- Execute one non-branch compiled operation. -/
   partial def executeOp (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) : Op → Except RuntimeError ExecResult
@@ -602,6 +630,24 @@ mutual
             here := newHere }
     | .jump _ => Except.ok <| continueExec state
     | .jumpIfZero _ _ => Except.ok <| continueExec state
+    | .evaluate line =>
+        match state.stack with
+        | u :: caddr :: restStack =>
+            let source := readCellString state.cells caddr u.toNat
+            match tokenizeRuntime source with
+            | .error err => Except.error err
+            | .ok tokens =>
+                let istate : InterpState := { dict := dict, base := state.base, here := state.here, cells := state.cells, latest := state.latest }
+                match interpretTokens istate [] tokens with
+                | .error err => Except.error err
+                | .ok (nextIstate, evalOps) =>
+                    let evalState : RuntimeState := { state with stack := restStack, here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
+                    match executeOps nextIstate.dict false evalState evalOps with
+                    | .error err => Except.error err
+                    | .ok result =>
+                        let finalDict := result.updatedDict.getD nextIstate.dict
+                        Except.ok { state := result.state, exited := false, updatedDict := some finalDict }
+        | _ => Except.error (.stackUnderflow "EVALUATE" line)
     | .compileCall name line => do
         -- Record the call in compilePending (read by executeImmediateToken),
         -- then also execute the word so runtime use works normally.
@@ -612,7 +658,7 @@ mutual
             Except.ok <| continueExec nextState
         | some (.compiled ops) => do
             let result ← executeOps dict true stateWithPending ops
-            Except.ok <| continueExec result.state
+            Except.ok { state := result.state, exited := false, updatedDict := result.updatedDict }
         | none => Except.error (.unknownWord name line)
     | .call name line =>
         if name == "EXIT" then
@@ -627,7 +673,7 @@ mutual
               Except.ok <| continueExec nextState
           | some (.compiled ops) => do
               let result ← executeOps dict true state ops
-              Except.ok <| continueExec result.state
+              Except.ok { state := result.state, exited := false, updatedDict := result.updatedDict }
           | none => Except.error (.unknownWord name line)
 
   /-- Execute compiled operations from left to right, honoring branch targets. -/
@@ -655,15 +701,16 @@ mutual
         if result.exited then
           Except.ok result
         else
-          executeOpsAt dict allowExit ops (pc + 1) result.state
+          let nextDict := result.updatedDict.getD dict
+          let nextResult ← executeOpsAt nextDict allowExit ops (pc + 1) result.state
+          Except.ok { nextResult with updatedDict := nextResult.updatedDict.orElse (fun _ => result.updatedDict) }
 
   /-- Execute a compiled operation list. -/
   partial def executeOps (dict : RuntimeDictionary) (allowExit : Bool) (state : RuntimeState) (ops : List Op)
       : Except RuntimeError ExecResult :=
     executeOpsAt dict allowExit ops 0 state
-end
 
-/-- Execute a token immediately while compiling a definition. -/
+  /-- Execute a token immediately while compiling a definition. -/
 partial def executeImmediateToken
     (dict : RuntimeDictionary)
     (state : DefinitionCompileState)
@@ -684,24 +731,6 @@ partial def executeImmediateToken
         compileLatest := runtimeState.state.latest
         base := runtimeState.state.base
         opsRev := pending.reverse ++ state.opsRev }
-
-/-- Compile a token as a call, even if the word is immediate. -/
-def compileLiteralToken (token : SourceToken) (state : DefinitionCompileState) : DefinitionCompileState :=
-  { state with opsRev := compileToken state.base token :: state.opsRev, compileHere := state.compileHere + 1 }
-
-/-- Emit one compiled operation into the current definition. -/
-def emitCompiledOp (op : Op) (state : DefinitionCompileState) : DefinitionCompileState :=
-  { state with opsRev := op :: state.opsRev, compileHere := state.compileHere + 1 }
-
-/-- Patch a previously emitted control-flow operation. -/
-def patchCompiledOp (idx : Int) (op : Op) (state : DefinitionCompileState) : DefinitionCompileState :=
-  { state with opsRev := replaceOpAt state.opsRev.reverse idx.toNat op |>.reverse }
-
-/-- Compile a literal execution token for the next parsed word. -/
-def compileExecutionToken (dict : RuntimeDictionary) (token : SourceToken) (state : DefinitionCompileState)
-    : Except RuntimeError DefinitionCompileState := do
-  let xt ← executionTokenOf dict token
-  Except.ok { state with opsRev := .push xt :: state.opsRev, compileHere := state.compileHere + 1 }
 
 /--
 Compile one token inside a colon definition. The definition ends only on a
@@ -846,6 +875,9 @@ partial def compileDefinitionTokens
       | false, ".\"", textTok :: remaining =>
           compileDefinitionTokens dict word startLine
             { state with opsRev := .emitText textTok.text :: state.opsRev, compileHere := state.compileHere + 1 } remaining
+      | false, "EVALUATE", _ =>
+          compileDefinitionTokens dict word startLine
+            { state with opsRev := .evaluate token.line :: state.opsRev, compileHere := state.compileHere + 1 } rest
       | false, "HEX", _ =>
           compileDefinitionTokens dict word startLine { state with base := 16 } rest
       | false, "DECIMAL", _ =>
@@ -860,14 +892,6 @@ partial def compileDefinitionTokens
                 compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
           | none =>
               compileDefinitionTokens dict word startLine (compileLiteralToken token state) rest
-
-/-- Interpretation-phase state threaded through interpretTokens. -/
-structure InterpState where
-  dict : RuntimeDictionary
-  base : Nat
-  here : Int
-  cells : List (Int × Int)
-  latest : Int
 
 /-- Interpret source tokens, updating the dictionary and compiling top-level code. -/
 partial def interpretTokens
@@ -939,6 +963,8 @@ partial def interpretTokens
         | [] => Except.error (.unterminatedString token.line)
         | textTok :: remaining =>
             interpretTokens istate (.emitText textTok.text :: opsRev) remaining
+      else if token.text == "EVALUATE" then
+        interpretTokens istate (.evaluate token.line :: opsRev) rest
       else if token.text == "IMMEDIATE" then
         interpretTokens { istate with dict := setLatestImmediate istate.dict } opsRev rest
       else
@@ -957,6 +983,7 @@ partial def interpretTokens
                 interpretTokens nextIstate opsRev remaining
         | _ =>
             interpretTokens istate (compileToken istate.base token :: opsRev) rest
+end
 
 /-- Evaluate a source program token by token from left to right. -/
 def evalRuntimeTokens (dict : RuntimeDictionary) (base : Nat) (tokens : List SourceToken) : Except RuntimeError RuntimeState := do
@@ -974,7 +1001,8 @@ def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken)
   let (nextIstate, ops) ← interpretTokens istate [] tokens
   let initState : RuntimeState := { session.state with here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
   let nextState ← executeOps nextIstate.dict false initState ops
-  Except.ok { dict := nextIstate.dict, state := { nextState.state with base := nextIstate.base, compilePending := [] } }
+  let finalDict := nextState.updatedDict.getD nextIstate.dict
+  Except.ok { dict := finalDict, state := { nextState.state with base := nextIstate.base, compilePending := [] } }
 
 /-- Parse and evaluate source text in one step. -/
 def runRuntime (source : String) : Except RuntimeError RuntimeState := do
