@@ -55,6 +55,9 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard lookupWord initialDictionary "TELL" |>.isSome
 #guard lookupWord initialDictionary "HERE" |>.isSome
 #guard lookupWord initialDictionary "LATEST" |>.isSome
+#guard lookupWord initialDictionary "DEPTH" |>.isSome
+#guard lookupWord initialDictionary "SOURCE" |>.isSome
+#guard lookupWord initialDictionary ">IN" |>.isSome
 #guard lookupWord initialDictionary "[']" |>.isSome
 #guard lookupWord initialDictionary "LIT" |>.isSome
 #guard lookupWord initialDictionary "LITSTRING" |>.isSome
@@ -80,6 +83,10 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "0 INVERT" == .ok { stack := [-1], output := "" }
 #guard runRuntime "41 1+" == .ok { stack := [42], output := "" }
 #guard runRuntime "41 1-" == .ok { stack := [40], output := "" }
+#guard runRuntime "0 NEGATE" == .ok { stack := [0], output := "" }
+#guard runRuntime "1 NEGATE" == .ok { stack := [-1], output := "" }
+#guard runRuntime "-3 NEGATE" == .ok { stack := [3], output := "" }
+#guard runRuntime "NEGATE" == .error (.stackUnderflow "NEGATE" 1)
 #guard runRuntime "KEY" == .ok { stack := [0], output := "", here := 0 }
 #guard runRuntime "65 EMIT" == .ok { stack := [], output := "A", here := 0 }
 #guard runRuntime "65 , 66 , 0 2 TELL" == .ok { stack := [], output := "AB", cells := [(0, 65), (1, 66)], here := 2 }
@@ -113,6 +120,8 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "2 dup *" == .ok { stack := [4], output := "" }
 #guard runRuntime "1 2 swap" == .ok { stack := [1, 2], output := "" }
 #guard runRuntime "1 2 over" == .ok { stack := [1, 2, 1], output := "" }
+#guard runRuntime "DEPTH" == .ok { stack := [0], output := "" }
+#guard runRuntime "10 20 DEPTH" == .ok { stack := [2, 20, 10], output := "" }
 #guard runRuntime "1 2 \\ comment here\n over" == .ok { stack := [1, 2, 1], output := "" }
 
 -- output words append to the output buffer and `.` pops the printed value
@@ -188,6 +197,10 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 -- S" pushes (addr, len) and stores char codes in memory cells
 #guard match runRuntime "S\" hello\"" with
   | .ok state => state.stack == [5, 0] && state.here == 5
+  | .error _ => false
+-- EVALUATE exposes the active string as SOURCE while it runs
+#guard match runRuntime "S\" SOURCE\" EVALUATE" with
+  | .ok state => state.stack == [6, 0]
   | .error _ => false
 -- S" inside a compiled word pushes addr and length at runtime
 #guard match runRuntimeFrom initialRuntimeSession ": getstr S\" hi\" ; getstr" with

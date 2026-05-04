@@ -49,6 +49,9 @@ structure RuntimeState where
   here : Int := 0
   latest : Int := 0
   base : Nat := 10
+  sourceAddr : Int := 0
+  sourceLen : Int := 0
+  inputIndex : Int := 0
   /-- Ops collected by `compileCall` during an immediate-mode execution,
       to be appended to the caller's `opsRev` by `executeImmediateToken`. -/
   compilePending : List Op := []
@@ -214,6 +217,19 @@ def latestAddress : Int := -314159266
 /-- A dedicated address designator for the synthetic STATE cell. -/
 def stateAddress : Int := -314159267
 
+/-- A dedicated address designator for the synthetic >IN cell. -/
+def inAddress : Int := -314159268
+
+/-- Address used to expose the active source buffer via `SOURCE`. -/
+def sourceBufferAddress : Int := -400000000
+
+/-- Write a string into consecutive cells starting at `addr`. -/
+def writeCellString (cells : List (Prod Int Int)) (addr : Int) (text : String) : List (Prod Int Int) :=
+  let rec go (acc : List (Prod Int Int)) (offset : Int) : List Char → List (Prod Int Int)
+    | [] => acc
+    | ch :: rest => go (writeCell acc (addr + offset) (Int.ofNat ch.toNat)) (offset + 1) rest
+  go cells 0 text.toList
+
 /-- Function type for built-in primitive words. -/
 abbrev BuiltinHandler := Nat → RuntimeState → Except RuntimeError RuntimeState
 
@@ -299,6 +315,10 @@ def builtinDefs : List (String × BuiltinHandler) :=
       match state.stack with
       | a :: rest => Except.ok { state with stack := (a - 1) :: rest }
       | _ => Except.error (.stackUnderflow "1-" line))
+  , builtin "NEGATE" (fun line state =>
+      match state.stack with
+      | a :: rest => Except.ok { state with stack := (-a) :: rest }
+      | _ => Except.error (.stackUnderflow "NEGATE" line))
   , builtin "dup" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := a :: a :: rest }
@@ -315,6 +335,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
       match state.stack with
       | a :: b :: rest => Except.ok { state with stack := b :: a :: b :: rest }
       | _ => Except.error (.stackUnderflow "over" line))
+  , builtin "DEPTH" (fun _ state =>
+      Except.ok { state with stack := Int.ofNat state.stack.length :: state.stack })
   , builtin "." (fun line state =>
       match state.stack with
       | a :: rest => Except.ok <| appendOutput { state with stack := rest } (toString a)
@@ -338,6 +360,9 @@ def builtinDefs : List (String × BuiltinHandler) :=
   , builtin "HERE" (fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , builtin "LATEST" (fun _ state => Except.ok { state with stack := latestAddress :: state.stack })
   , builtin "STATE" (fun _ state => Except.ok { state with stack := stateAddress :: state.stack })
+  , builtin "SOURCE" (fun _ state =>
+      Except.ok { state with stack := state.sourceLen :: state.sourceAddr :: state.stack })
+  , builtin ">IN" (fun _ state => Except.ok { state with stack := inAddress :: state.stack })
   , builtin "[']" (fun line _ => Except.error (.invalidPrimitiveUse "[']" line))
   , builtin "LIT" (fun line _ => Except.error (.invalidPrimitiveUse "LIT" line))
   , builtin "LITSTRING" (fun line _ => Except.error (.invalidPrimitiveUse "LITSTRING" line))
@@ -357,6 +382,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
             Except.ok { state with stack := state.latest :: rest }
           else if addr == stateAddress then
             Except.ok { state with stack := (if state.compiling then -1 else 0) :: rest }
+          else if addr == inAddress then
+            Except.ok { state with stack := state.inputIndex :: rest }
           else if let some value := readCell state.cells addr then
             Except.ok { state with stack := value :: rest }
           else
@@ -369,6 +396,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
             Except.ok { state with here := value, stack := rest }
           else if addr == latestAddress then
             Except.ok { state with latest := value, stack := rest }
+          else if addr == inAddress then
+            Except.ok { state with inputIndex := value, stack := rest }
           else if (readCell state.cells addr).isSome then
             Except.ok { state with cells := writeCell state.cells addr value, stack := rest }
           else
@@ -379,6 +408,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | addr :: delta :: rest =>
           if addr == hereAddress then
             Except.ok { state with here := state.here + delta, stack := rest }
+          else if addr == inAddress then
+            Except.ok { state with inputIndex := state.inputIndex + delta, stack := rest }
           else if let some value := readCell state.cells addr then
             Except.ok { state with cells := writeCell state.cells addr (value + delta), stack := rest }
           else
@@ -422,6 +453,14 @@ def initialDictionary : RuntimeDictionary :=
 /-- The empty initial machine state. -/
 def initialRuntimeState : RuntimeState :=
   { stack := [], output := "" }
+
+/-- Refresh the current source buffer exposed via `SOURCE`. -/
+def installSourceBuffer (state : RuntimeState) (source : String) : RuntimeState :=
+  { state with
+      cells := writeCellString state.cells sourceBufferAddress source
+      sourceAddr := sourceBufferAddress
+      sourceLen := source.length
+      inputIndex := 0 }
 
 /-- The initial interpreter session. -/
 def initialRuntimeSession : RuntimeSession :=
@@ -641,12 +680,27 @@ mutual
                 match interpretTokens istate [] tokens with
                 | .error err => Except.error err
                 | .ok (nextIstate, evalOps) =>
-                    let evalState : RuntimeState := { state with stack := restStack, here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
+                    let evalState : RuntimeState :=
+                      { state with
+                          stack := restStack
+                          here := nextIstate.here
+                          cells := nextIstate.cells
+                          latest := nextIstate.latest
+                          sourceAddr := caddr
+                          sourceLen := u
+                          inputIndex := 0 }
                     match executeOps nextIstate.dict false evalState evalOps with
                     | .error err => Except.error err
                     | .ok result =>
                         let finalDict := result.updatedDict.getD nextIstate.dict
-                        Except.ok { state := result.state, exited := false, updatedDict := some finalDict }
+                        Except.ok
+                          { state :=
+                              { result.state with
+                                  sourceAddr := state.sourceAddr
+                                  sourceLen := state.sourceLen
+                                  inputIndex := state.inputIndex }
+                            exited := false
+                            updatedDict := some finalDict }
         | _ => Except.error (.stackUnderflow "EVALUATE" line)
     | .compileCall name line => do
         -- Record the call in compilePending (read by executeImmediateToken),
@@ -1002,16 +1056,32 @@ def evalRuntimeTokensFrom (session : RuntimeSession) (tokens : List SourceToken)
   let initState : RuntimeState := { session.state with here := nextIstate.here, cells := nextIstate.cells, latest := nextIstate.latest }
   let nextState ← executeOps nextIstate.dict false initState ops
   let finalDict := nextState.updatedDict.getD nextIstate.dict
-  Except.ok { dict := finalDict, state := { nextState.state with base := nextIstate.base, compilePending := [] } }
-
-/-- Parse and evaluate source text in one step. -/
-def runRuntime (source : String) : Except RuntimeError RuntimeState := do
-  let tokens ← tokenizeRuntime source
-  evalRuntimeTokens initialDictionary 10 tokens
+  Except.ok
+    { dict := finalDict
+      state :=
+        { nextState.state with
+            base := nextIstate.base
+            compilePending := []
+            cells := nextState.state.cells.filter (fun cell => cell.1 >= 0)
+            sourceAddr := 0
+            sourceLen := 0
+            inputIndex := 0 } }
 
 /-- Parse and evaluate source text against an existing interpreter session. -/
-def runRuntimeFrom (session : RuntimeSession) (source : String) : Except RuntimeError RuntimeSession := do
-  let tokens ← tokenizeRuntime source
-  evalRuntimeTokensFrom session tokens
+def runRuntimeFrom (session : RuntimeSession) (source : String) : Except RuntimeError RuntimeSession :=
+  match tokenizeRuntime source with
+  | Except.ok tokens =>
+      evalRuntimeTokensFrom { session with state := installSourceBuffer session.state source } tokens
+  | Except.error err => Except.error err
+
+/-- Parse and evaluate source text in one step. -/
+def runRuntime (source : String) : Except RuntimeError RuntimeState :=
+  match runRuntimeFrom initialRuntimeSession source with
+  | Except.ok session => Except.ok session.state
+  | Except.error err => Except.error err
 
 end LeanForth
+
+
+
+

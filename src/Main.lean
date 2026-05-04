@@ -31,15 +31,81 @@ def runRepl : IO Unit := do
   IO.println "LeanForth REPL. Type #quit to exit."
   replLoop LeanForth.initialRuntimeSession
 
+def fileLines (contents : String) : List String :=
+  contents.splitOn "\n" |>.map fun line => line.trimAsciiEnd.toString
+
+def shiftErrorLine (lineOffset : Nat) : LeanForth.RuntimeError → LeanForth.RuntimeError
+  | .stackUnderflow word line => .stackUnderflow word (line + lineOffset)
+  | .divisionByZero word line => .divisionByZero word (line + lineOffset)
+  | .unknownWord word line => .unknownWord word (line + lineOffset)
+  | .invalidPrimitiveUse word line => .invalidPrimitiveUse word (line + lineOffset)
+  | .invalidDefinition line => .invalidDefinition (line + lineOffset)
+  | .missingSemicolon word line => .missingSemicolon word (line + lineOffset)
+  | .unterminatedString line => .unterminatedString (line + lineOffset)
+  | .unterminatedComment line => .unterminatedComment (line + lineOffset)
+  | .missingCharArgument line => .missingCharArgument (line + lineOffset)
+  | .invalidAddress addr line => .invalidAddress addr (line + lineOffset)
+
+def isIncompleteChunkError : LeanForth.RuntimeError → Bool
+  | .missingSemicolon _ _ => true
+  | .unterminatedString _ => true
+  | .unterminatedComment _ => true
+  | _ => false
+
+def normalizeTopLevelLine (pending : String) (line : String) : String :=
+  if pending.isEmpty then
+    let trimmed := line.trimAscii.toString
+    if trimmed == "TESTING" || trimmed.startsWith "TESTING " then
+      "TESTING"
+    else
+      line
+  else
+    line
+
+partial def runFileLines
+    (filePath : String)
+    (session : LeanForth.RuntimeSession)
+    (pending : String)
+    (pendingStartLine : Nat)
+    (currentLine : Nat)
+    : List String → IO LeanForth.RuntimeSession
+  | [] =>
+      if pending.isEmpty then
+        pure session
+      else
+        match LeanForth.runRuntimeFrom session pending with
+        | .ok nextSession => printSessionResult nextSession
+        | .error err => do
+            let shifted := shiftErrorLine pendingStartLine err
+            IO.eprintln s!"error in {filePath}: {LeanForth.formatRuntimeError shifted}"
+            pure session
+  | line :: rest => do
+      let line := normalizeTopLevelLine pending line
+      let chunk :=
+        if pending.isEmpty then
+          line
+        else
+          pending ++ "\n" ++ line
+      let chunkStart :=
+        if pending.isEmpty then currentLine else pendingStartLine
+      match LeanForth.runRuntimeFrom session chunk with
+      | .ok nextSession =>
+          let nextSession ← printSessionResult nextSession
+          runFileLines filePath nextSession "" 0 (currentLine + 1) rest
+      | .error err =>
+          if isIncompleteChunkError err then
+            runFileLines filePath session chunk chunkStart (currentLine + 1) rest
+          else do
+            let shifted := shiftErrorLine chunkStart err
+            IO.eprintln s!"error in {filePath}: {LeanForth.formatRuntimeError shifted}"
+            pure session
+
 partial def runFiles (session : LeanForth.RuntimeSession) : List String → IO Unit
   | [] => pure ()
   | filePath :: rest => do
       let contents ← IO.FS.readFile filePath
-      match LeanForth.runRuntimeFrom session contents with
-      | .ok nextSession =>
-          let nextSession ← printSessionResult nextSession
-          runFiles nextSession rest
-      | .error err => IO.eprintln s!"error in {filePath}: {LeanForth.formatRuntimeError err}"
+      let nextSession ← runFileLines filePath session "" 0 1 (fileLines contents)
+      runFiles nextSession rest
 
 def main (args : List String) : IO Unit := do
   match args with
