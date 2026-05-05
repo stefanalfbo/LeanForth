@@ -327,6 +327,11 @@ def builtinDefs : List (String × BuiltinHandler) :=
       match state.stack with
       | a :: rest => Except.ok { state with stack := (if a < 0 then -1 else 0) :: rest }
       | _ => Except.error (.stackUnderflow "0<" line))
+  , builtin "?DUP" (fun line state =>
+      match state.stack with
+      | 0 :: _ => Except.ok state
+      | a :: rest => Except.ok { state with stack := a :: a :: rest }
+      | _ => Except.error (.stackUnderflow "?DUP" line))
   , builtin "dup" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := a :: a :: rest }
