@@ -91,6 +91,10 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "1 0=" == .ok { stack := [0], output := "" }
 #guard runRuntime "-1 0=" == .ok { stack := [0], output := "" }
 #guard runRuntime "0=" == .error (.stackUnderflow "0=" 1)
+#guard runRuntime "0 0<" == .ok { stack := [0], output := "" }
+#guard runRuntime "-1 0<" == .ok { stack := [-1], output := "" }
+#guard runRuntime "1 0<" == .ok { stack := [0], output := "" }
+#guard runRuntime "0<" == .error (.stackUnderflow "0<" 1)
 #guard runRuntime "KEY" == .ok { stack := [0], output := "", here := 0 }
 #guard runRuntime "65 EMIT" == .ok { stack := [], output := "A", here := 0 }
 #guard runRuntime "65 , 66 , 0 2 TELL" == .ok { stack := [], output := "AB", cells := [(0, 65), (1, 66)], here := 2 }
