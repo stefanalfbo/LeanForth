@@ -39,6 +39,11 @@ inductive Op where
   | evaluate (line : Nat)
   | jump (target : Nat)
   | jumpIfZero (target : Nat) (line : Nat)
+  | doLoop (line : Nat)
+  | loopNext (backTarget : Nat) (line : Nat)
+  | plusLoopNext (backTarget : Nat) (line : Nat)
+  | leaveLoop (exitTarget : Nat)
+  | unloop
   deriving Repr, DecidableEq, BEq
 
 /-- The current machine state. -/
@@ -57,6 +62,7 @@ structure RuntimeState where
   compilePending : List Op := []
   /-- True when executing inside a colon definition (for STATE @). -/
   compiling : Bool := false
+  loopStack : List (Int × Int) := []
   deriving Repr, DecidableEq, BEq, Inhabited
 
 /-- Dictionary entries supported by the runtime. -/
@@ -301,8 +307,16 @@ def builtinDefs : List (String × BuiltinHandler) :=
       | _ => Except.error (.stackUnderflow "MOD" line))
   , builtin "=" (fun line state =>
       match state.stack with
-      | a :: b :: rest => Except.ok { state with stack := (if b == a then 1 else 0) :: rest }
+      | a :: b :: rest => Except.ok { state with stack := (if b == a then -1 else 0) :: rest }
       | _ => Except.error (.stackUnderflow "=" line))
+  , builtin "<" (fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := (if b < a then -1 else 0) :: rest }
+      | _ => Except.error (.stackUnderflow "<" line))
+  , builtin ">" (fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := (if b > a then -1 else 0) :: rest }
+      | _ => Except.error (.stackUnderflow ">" line))
   , builtin "INVERT" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := (~~~a) :: rest }
@@ -446,6 +460,18 @@ def builtinDefs : List (String × BuiltinHandler) :=
   , builtin "DECIMAL" (fun _ state => Except.ok { state with base := 10 })
   , builtin "TRUE" (fun _ state => Except.ok { state with stack := (-1) :: state.stack })
   , builtin "FALSE" (fun _ state => Except.ok { state with stack := 0 :: state.stack })
+  , builtin "I" (fun line state =>
+      match state.loopStack with
+      | (index, _) :: _ => Except.ok { state with stack := index :: state.stack }
+      | [] => Except.error (.stackUnderflow "I" line))
+  , builtin "J" (fun line state =>
+      match state.loopStack with
+      | _ :: (index, _) :: _ => Except.ok { state with stack := index :: state.stack }
+      | _ => Except.error (.stackUnderflow "J" line))
+  , builtin "UNLOOP" (fun line state =>
+      match state.loopStack with
+      | _ :: rest => Except.ok { state with loopStack := rest }
+      | [] => Except.error (.stackUnderflow "UNLOOP" line))
   , builtin "CELLS" (fun _ state => Except.ok state)  -- 1 cell = 1 unit in this implementation
   , builtin "CELL+" (fun line state =>
       match state.stack with
@@ -498,6 +524,7 @@ structure DefinitionCompileState where
   base : Nat
   immediateMode : Bool
   definingWordImmediate : Bool
+  leavePatches : List (List Int) := []
   deriving Repr, DecidableEq, BEq
 
 /-- The initial compile-time state for a colon definition. -/
@@ -691,6 +718,11 @@ mutual
             here := newHere }
     | .jump _ => Except.ok <| continueExec state
     | .jumpIfZero _ _ => Except.ok <| continueExec state
+    | .doLoop _ => Except.ok <| continueExec state
+    | .loopNext _ _ => Except.ok <| continueExec state
+    | .plusLoopNext _ _ => Except.ok <| continueExec state
+    | .leaveLoop _ => Except.ok <| continueExec state
+    | .unloop => Except.ok <| continueExec state
     | .evaluate line =>
         match state.stack with
         | u :: caddr :: restStack =>
@@ -772,6 +804,46 @@ mutual
             else
               executeOpsAt dict allowExit ops (pc + 1) { state with stack := rest }
         | _ => Except.error (.stackUnderflow "0BRANCH" line)
+    | some (.doLoop line) =>
+        match state.stack with
+        | index :: limit :: rest =>
+            executeOpsAt dict allowExit ops (pc + 1)
+              { state with stack := rest, loopStack := (index, limit) :: state.loopStack }
+        | _ => Except.error (.stackUnderflow "DO" line)
+    | some (.loopNext backTarget line) =>
+        match state.loopStack with
+        | (index, limit) :: restLoop =>
+            let newIndex := index + 1
+            if newIndex < limit then
+              executeOpsAt dict allowExit ops backTarget
+                { state with loopStack := (newIndex, limit) :: restLoop }
+            else
+              executeOpsAt dict allowExit ops (pc + 1)
+                { state with loopStack := restLoop }
+        | [] => Except.error (.stackUnderflow "LOOP" line)
+    | some (.plusLoopNext backTarget line) =>
+        match state.stack, state.loopStack with
+        | step :: restStack, (index, limit) :: restLoop =>
+            let newIndex := index + step
+            let continues := if step >= 0 then newIndex < limit else newIndex >= limit
+            if continues then
+              executeOpsAt dict allowExit ops backTarget
+                { state with stack := restStack, loopStack := (newIndex, limit) :: restLoop }
+            else
+              executeOpsAt dict allowExit ops (pc + 1)
+                { state with stack := restStack, loopStack := restLoop }
+        | [], _ => Except.error (.stackUnderflow "+LOOP" line)
+        | _, [] => Except.error (.stackUnderflow "+LOOP" line)
+    | some (.leaveLoop exitTarget) =>
+        match state.loopStack with
+        | _ :: restLoop =>
+            executeOpsAt dict allowExit ops exitTarget { state with loopStack := restLoop }
+        | [] => executeOpsAt dict allowExit ops (pc + 1) state
+    | some .unloop =>
+        match state.loopStack with
+        | _ :: restLoop =>
+            executeOpsAt dict allowExit ops (pc + 1) { state with loopStack := restLoop }
+        | [] => executeOpsAt dict allowExit ops (pc + 1) state
     | some op => do
         let result ← executeOp dict allowExit state op
         if result.exited then
@@ -896,6 +968,52 @@ partial def compileDefinitionTokens
               let patchedState := patchCompiledOp branchIdx (Op.jumpIfZero emittedState.compileHere.toNat token.line) emittedState
               compileDefinitionTokens dict word startLine patchedState rest
           | _ => Except.error (.stackUnderflow "REPEAT" token.line)
+      | false, "DO", _ =>
+          let nextState := emitCompiledOp (.doLoop token.line) state
+          -- backTarget = first op of loop body = compileHere after doLoop
+          compileDefinitionTokens dict word startLine
+            { nextState with
+                compileStack := nextState.compileHere :: nextState.compileStack
+                leavePatches := [] :: nextState.leavePatches } rest
+      | false, "LOOP", _ =>
+          match state.compileStack, state.leavePatches with
+          | backTarget :: remainingStack, currentLeaves :: remainingLeaves =>
+              let emittedState := emitCompiledOp (.loopNext backTarget.toNat token.line)
+                { state with compileStack := remainingStack, leavePatches := remainingLeaves }
+              -- exitTarget = position after loopNext
+              let exitTarget := emittedState.compileHere
+              let patchedState := currentLeaves.foldl
+                (fun s idx => patchCompiledOp idx (.leaveLoop exitTarget.toNat) s)
+                emittedState
+              compileDefinitionTokens dict word startLine patchedState rest
+          | [], _ => Except.error (.stackUnderflow "LOOP" token.line)
+          | _, [] => Except.error (.stackUnderflow "LOOP" token.line)
+      | false, "+LOOP", _ =>
+          match state.compileStack, state.leavePatches with
+          | backTarget :: remainingStack, currentLeaves :: remainingLeaves =>
+              let emittedState := emitCompiledOp (.plusLoopNext backTarget.toNat token.line)
+                { state with compileStack := remainingStack, leavePatches := remainingLeaves }
+              let exitTarget := emittedState.compileHere
+              let patchedState := currentLeaves.foldl
+                (fun s idx => patchCompiledOp idx (.leaveLoop exitTarget.toNat) s)
+                emittedState
+              compileDefinitionTokens dict word startLine patchedState rest
+          | [], _ => Except.error (.stackUnderflow "+LOOP" token.line)
+          | _, [] => Except.error (.stackUnderflow "+LOOP" token.line)
+      | false, "LEAVE", _ =>
+          match state.leavePatches with
+          | currentLeaves :: remainingLeaves =>
+              let leaveIdx := state.compileHere
+              let nextState := emitCompiledOp (.leaveLoop 0)
+                { state with leavePatches := (leaveIdx :: currentLeaves) :: remainingLeaves }
+              compileDefinitionTokens dict word startLine nextState rest
+          | [] =>
+              -- LEAVE outside a DO loop — emit anyway (will jump to 0)
+              compileDefinitionTokens dict word startLine
+                (emitCompiledOp (.leaveLoop 0) state) rest
+      | false, "UNLOOP", _ =>
+          compileDefinitionTokens dict word startLine
+            (emitCompiledOp .unloop state) rest
       | false, "(", _ => do
           let remaining ← dropCommentTokens token.line rest
           compileDefinitionTokens dict word startLine state remaining

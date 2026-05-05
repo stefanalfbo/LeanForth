@@ -78,7 +78,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "20 3 /MOD" == .ok { stack := [2, 6], output := "" }
 #guard runRuntime "1 2 SWAP" == .ok { stack := [1, 2], output := "" }
 #guard runRuntime "7 DUP *" == .ok { stack := [49], output := "" }
-#guard runRuntime "3 3 =" == .ok { stack := [1], output := "" }
+#guard runRuntime "3 3 =" == .ok { stack := [-1], output := "" }
 #guard runRuntime "3 4 =" == .ok { stack := [0], output := "" }
 #guard runRuntime "0 INVERT" == .ok { stack := [-1], output := "" }
 #guard runRuntime "41 1+" == .ok { stack := [42], output := "" }
@@ -110,7 +110,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "HERE @" == .ok { stack := [0], output := "", here := 0 }
 #guard runRuntime "LATEST @" == .ok { stack := [0], output := "", latest := 0 }
-#guard runRuntime "' DUP >CFA ' dup =" == .ok { stack := [1], output := "" }
+#guard runRuntime "' DUP >CFA ' dup =" == .ok { stack := [-1], output := "" }
 #guard runRuntime "0 @" == .error (.invalidAddress 0 1)
 #guard runRuntime "-1 @" == .error (.invalidAddress (-1) 1)
 #guard runRuntime "12 HERE ! HERE @" == .ok { stack := [12], output := "", here := 12 }
@@ -118,7 +118,7 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "3 HERE +! HERE @" == .ok { stack := [3], output := "", here := 3 }
 #guard runRuntime "99 ," == .ok { stack := [], output := "", cells := [(0, 99)], here := 1 }
 #guard runRuntime "99 , 0 @" == .ok { stack := [99], output := "", cells := [(0, 99)], here := 1 }
-#guard runRuntime "' dup ' DUP =" == .ok { stack := [1], output := "" }
+#guard runRuntime "' dup ' DUP =" == .ok { stack := [-1], output := "" }
 #guard runRuntime "' dup ' swap =" == .ok { stack := [0], output := "" }
 #guard runRuntime "[CHAR] A" == .ok { stack := [65], output := "" }
 #guard match runRuntimeFrom initialRuntimeSession ": sq dup * ;" with
@@ -129,6 +129,26 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
       match runRuntimeFrom session "3 +" with
       | .ok nextSession => nextSession.state == { stack := [5], output := "" }
       | .error _ => false
+  | .error _ => false
+
+-- DO/LOOP counts from index up to limit-1; I yields the current index
+#guard match runRuntimeFrom initialRuntimeSession ": GD1 DO I LOOP ;" with
+  | .ok s => expectState (runRuntimeFrom s "4 1 GD1" |>.map (·.state)) { stack := [3, 2, 1], output := "" }
+  | .error _ => false
+-- counting down with +LOOP and a negative step
+#guard match runRuntimeFrom initialRuntimeSession ": GD2 DO I -1 +LOOP ;" with
+  | .ok s => expectState (runRuntimeFrom s "1 4 GD2" |>.map (·.state)) { stack := [1, 2, 3, 4], output := "" }
+  | .error _ => false
+-- J returns the outer loop index in a nested loop
+#guard match runRuntimeFrom initialRuntimeSession ": GD3 DO 1 0 DO J LOOP LOOP ;" with
+  | .ok s => expectState (runRuntimeFrom s "4 1 GD3" |>.map (·.state)) { stack := [3, 2, 1], output := "" }
+  | .error _ => false
+-- LEAVE exits the loop immediately, leaving the remaining stack
+#guard match runRuntimeFrom initialRuntimeSession ": GD5 123 SWAP 0 DO I 4 > IF DROP 234 LEAVE THEN LOOP ;" with
+  | .ok s => expectState (runRuntimeFrom s "6 GD5" |>.map (·.state)) { stack := [234], output := "" }
+  | .error _ => false
+#guard match runRuntimeFrom initialRuntimeSession ": GD5 123 SWAP 0 DO I 4 > IF DROP 234 LEAVE THEN LOOP ;" with
+  | .ok s => expectState (runRuntimeFrom s "1 GD5" |>.map (·.state)) { stack := [123], output := "" }
   | .error _ => false
 
 -- stack words operate on source text, not hand-built constructors
@@ -165,8 +185,8 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard expectState (runRuntime ": doit 42 ; : make-doit POSTPONE doit ; IMMEDIATE : x make-doit ; x") { stack := [42], output := "" }
 -- POSTPONE compiles an immediate word as a deferred call (without executing it immediately)
 #guard expectState (runRuntime ": doit 99 ; IMMEDIATE : wrap POSTPONE doit ; wrap") { stack := [99], output := "" }
-#guard expectState (runRuntime ": xt-word ' dup ; xt-word ' DUP =") { stack := [1], output := "" }
-#guard expectState (runRuntime ": xt-word ['] dup ; xt-word ' DUP =") { stack := [1], output := "" }
+#guard expectState (runRuntime ": xt-word ' dup ; xt-word ' DUP =") { stack := [-1], output := "" }
+#guard expectState (runRuntime ": xt-word ['] dup ; xt-word ' DUP =") { stack := [-1], output := "" }
 #guard expectState (runRuntime ": stop-here 1 EXIT 2 ; stop-here") { stack := [1], output := "" }
 #guard expectState (runRuntime ": inner 2 EXIT 3 ; : outer 1 inner 4 ; outer") { stack := [4, 2, 1], output := "" }
 #guard expectState (runRuntime ": pick IF 111 ELSE 222 THEN ; 0 pick") { stack := [222], output := "" }
