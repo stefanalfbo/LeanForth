@@ -370,6 +370,15 @@ def builtinDefs : List (String × BuiltinHandler) :=
             let text := readCellString state.cells addr len.toNat
             Except.ok <| appendOutput { state with stack := rest } text
       | _ => Except.error (.stackUnderflow "TELL" line))
+  , builtin "TYPE" (fun line state =>
+      match state.stack with
+      | len :: addr :: rest =>
+          if len < 0 then
+            Except.error (.invalidAddress len line)
+          else
+            let text := readCellString state.cells addr len.toNat
+            Except.ok <| appendOutput { state with stack := rest } text
+      | _ => Except.error (.stackUnderflow "TYPE" line))
   , builtin "HERE" (fun _ state => Except.ok { state with stack := hereAddress :: state.stack })
   , builtin "LATEST" (fun _ state => Except.ok { state with stack := latestAddress :: state.stack })
   , builtin "STATE" (fun _ state => Except.ok { state with stack := stateAddress :: state.stack })

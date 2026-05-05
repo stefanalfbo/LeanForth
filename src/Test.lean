@@ -102,6 +102,9 @@ def expectState (result : Except RuntimeError RuntimeState) (expected : RuntimeS
 #guard runRuntime "KEY" == .ok { stack := [0], output := "", here := 0 }
 #guard runRuntime "65 EMIT" == .ok { stack := [], output := "A", here := 0 }
 #guard runRuntime "65 , 66 , 0 2 TELL" == .ok { stack := [], output := "AB", cells := [(0, 65), (1, 66)], here := 2 }
+#guard runRuntime "65 , 66 , 0 2 TYPE" == .ok { stack := [], output := "AB", cells := [(0, 65), (1, 66)], here := 2 }
+#guard runRuntime "S\" hi\" TYPE" == .ok { stack := [], output := "hi", cells := [(0, 104), (1, 105)], here := 2 }
+#guard runRuntime "TYPE" == .error (.stackUnderflow "TYPE" 1)
 #guard runRuntime "3 4 + \\ trailing comment" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add later ) 4 +" == .ok { stack := [7], output := "" }
 #guard runRuntime "3 ( add\n later ) 4 +" == .ok { stack := [7], output := "" }
