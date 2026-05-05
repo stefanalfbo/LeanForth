@@ -269,6 +269,29 @@ theorem replaceOpAt_length (ops : List Op) (idx : Nat) (op : Op) :
       | 0 => simp [replaceOpAt]
       | n + 1 => simp [replaceOpAt, ih]
 
+-- Two's complement bitwise ops for arbitrary-precision Int.
+-- negSucc n represents -(n+1), whose bit pattern is the bitwise complement of n.
+private def intBitAnd (a b : Int) : Int :=
+  match a, b with
+  | .ofNat m,   .ofNat n   => .ofNat (m &&& n)
+  | .negSucc m, .negSucc n => .negSucc (m ||| n)
+  | .ofNat m,   .negSucc n => .ofNat (m - (m &&& n))
+  | .negSucc m, .ofNat n   => .ofNat (n - (n &&& m))
+
+private def intBitOr (a b : Int) : Int :=
+  match a, b with
+  | .ofNat m,   .ofNat n   => .ofNat (m ||| n)
+  | .negSucc m, .negSucc n => .negSucc (m &&& n)
+  | .ofNat m,   .negSucc n => .negSucc (n - (n &&& m))
+  | .negSucc m, .ofNat n   => .negSucc (m - (m &&& n))
+
+private def intBitXor (a b : Int) : Int :=
+  match a, b with
+  | .ofNat m,   .ofNat n   => .ofNat (m ^^^ n)
+  | .negSucc m, .negSucc n => .ofNat (m ^^^ n)
+  | .ofNat m,   .negSucc n => .negSucc (m ^^^ n)
+  | .negSucc m, .ofNat n   => .negSucc (m ^^^ n)
+
 /-- Read the operation at `idx` if it exists. -/
 def getOpAt? (ops : List Op) (idx : Nat) : Option Op :=
   match ops, idx with
@@ -321,6 +344,18 @@ def builtinDefs : List (String × BuiltinHandler) :=
       match state.stack with
       | a :: rest => Except.ok { state with stack := (~~~a) :: rest }
       | _ => Except.error (.stackUnderflow "INVERT" line))
+  , builtin "AND" (fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := intBitAnd b a :: rest }
+      | _ => Except.error (.stackUnderflow "AND" line))
+  , builtin "OR" (fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := intBitOr b a :: rest }
+      | _ => Except.error (.stackUnderflow "OR" line))
+  , builtin "XOR" (fun line state =>
+      match state.stack with
+      | a :: b :: rest => Except.ok { state with stack := intBitXor b a :: rest }
+      | _ => Except.error (.stackUnderflow "XOR" line))
   , builtin "1+" (fun line state =>
       match state.stack with
       | a :: rest => Except.ok { state with stack := (a + 1) :: rest }
@@ -422,6 +457,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
             Except.ok { state with stack := state.inputIndex :: rest }
           else if let some value := readCell state.cells addr then
             Except.ok { state with stack := value :: rest }
+          else if addr >= 0 && addr < state.here then
+            Except.ok { state with stack := 0 :: rest }
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "@" line))
@@ -434,7 +471,7 @@ def builtinDefs : List (String × BuiltinHandler) :=
             Except.ok { state with latest := value, stack := rest }
           else if addr == inAddress then
             Except.ok { state with inputIndex := value, stack := rest }
-          else if (readCell state.cells addr).isSome then
+          else if addr >= 0 && addr < state.here then
             Except.ok { state with cells := writeCell state.cells addr value, stack := rest }
           else
             Except.error (.invalidAddress addr line)
@@ -448,6 +485,8 @@ def builtinDefs : List (String × BuiltinHandler) :=
             Except.ok { state with inputIndex := state.inputIndex + delta, stack := rest }
           else if let some value := readCell state.cells addr then
             Except.ok { state with cells := writeCell state.cells addr (value + delta), stack := rest }
+          else if addr >= 0 && addr < state.here then
+            Except.ok { state with cells := writeCell state.cells addr delta, stack := rest }
           else
             Except.error (.invalidAddress addr line)
       | _ => Except.error (.stackUnderflow "+!" line))
